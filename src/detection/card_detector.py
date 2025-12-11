@@ -1,7 +1,6 @@
 """
 src/detection/card_detector.py: Card edge detection and perspective warping
-Following PRD.md Task 2 specifications
-Detects card boundaries and warps to canonical 512x512 size
+Detects card boundaries and warps to canonical size.
 """
 
 import cv2

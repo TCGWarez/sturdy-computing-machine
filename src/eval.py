@@ -1,6 +1,5 @@
 """
 src/eval.py: Evaluation harness for card recognition system
-Following PRD.md Task 12 specifications
 
 Computes metrics:
 - Precision@1: % of queries where top-1 match is correct
@@ -280,8 +279,7 @@ def print_metrics(metrics: EvaluationMetrics):
           f"({metrics.high_confidence_count} predictions)")
     print("="*80)
 
-    # Check against PRD acceptance criteria
-    print("\nPRD Acceptance Criteria:")
+    print("\nAcceptance Criteria:")
     print(f"  Precision@1 ≥ 0.95: {'✓ PASS' if metrics.precision_at_1 >= 0.95 else '✗ FAIL'}")
     print(f"  Precision@5 ≥ 0.99: {'✓ PASS' if metrics.precision_at_5 >= 0.99 else '✗ FAIL'}")
     print(f"  Avg Time ≤ 1.0s:    {'✓ PASS' if metrics.avg_time_per_image <= 1.0 else '✗ FAIL'}")
@@ -427,12 +425,11 @@ Example usage:
     if args.errors:
         generate_error_report(predictions, ground_truth, args.errors)
 
-    # Return exit code based on PRD criteria
     if metrics.precision_at_1 >= 0.95 and metrics.precision_at_5 >= 0.99:
-        logger.info("✓ PRD acceptance criteria met")
+        logger.info("✓ Acceptance criteria met")
         return 0
     else:
-        logger.warning("✗ PRD acceptance criteria not met")
+        logger.warning("✗ Acceptance criteria not met")
         return 1
 
 

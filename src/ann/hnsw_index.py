@@ -1,10 +1,6 @@
 """
 src/ann/hnsw_index.py: HNSWlib-based ANN index wrapper
-Alternative to FAISS following PRD.md Task 6 specifications
-- Simpler and faster than FAISS for some use cases
-- Build persistent index from embeddings
-- Support build_index(embeddings) and query(embedding, top_k)
-- Serialize index files with metadata
+Alternative to FAISS, simpler and faster for some use cases.
 """
 
 import hnswlib
@@ -20,10 +16,7 @@ from src.indexing.indexer import deserialize_embedding
 
 
 class HNSWIndex:
-    """
-    HNSWlib-based ANN index for fast similarity search
-    Following PRD.md specifications
-    """
+    """HNSWlib-based ANN index for fast similarity search."""
 
     def __init__(
         self,

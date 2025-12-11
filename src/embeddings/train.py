@@ -1,15 +1,10 @@
 """
 src/embeddings/train.py: CLIP fine-tuning training loop
-Following PRD.md Task 11 specifications
 
-Features:
 - Loads corrections from data/al_labels.csv
 - Uses contrastive loss (NT-Xent/SimCLR-style) on CLIP
 - Constructs positive pairs from (scanned_image, reference_image)
-- Constructs negatives with in-batch or hard negatives from index
-- Training hyperparams per PRD: batch_size=64, lr=1e-4, epochs=5, embedding_dim=256 (projection head) or 512
 - Saves checkpoint and replaces index embeddings after retraining
-- Accepts --data_csv and --ckpt_out flags
 """
 
 import torch
@@ -33,7 +28,6 @@ from src.database.db import get_card_full_data
 
 logger = logging.getLogger(__name__)
 
-# Training hyperparameters per PRD
 DEFAULT_BATCH_SIZE = 64
 DEFAULT_LR = 1e-4
 DEFAULT_EPOCHS = 5
@@ -238,10 +232,7 @@ class ALDataset(torch.utils.data.Dataset):
 
 
 class CLIPFineTuner:
-    """
-    CLIP fine-tuner with contrastive learning
-    Following PRD.md Task 11 specifications
-    """
+    """CLIP fine-tuner with contrastive learning."""
 
     def __init__(
         self,
@@ -448,8 +439,7 @@ def train_clip_model(
     job_dir: Optional[Path] = None
 ) -> Dict:
     """
-    Main training function
-    Following PRD.md Task 11 specifications
+    Main training function.
 
     Args:
         data_csv: Path to active learning labels CSV
@@ -625,10 +615,7 @@ def train_clip_model(
 
 
 def main():
-    """
-    CLI entry point for training
-    Following PRD.md Task 11 specifications
-    """
+    """CLI entry point for training."""
     parser = argparse.ArgumentParser(
         description='Fine-tune CLIP model on active learning corrections'
     )

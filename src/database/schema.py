@@ -1,6 +1,5 @@
 """
 src/database/schema.py: Database schema definitions using SQLAlchemy
-Following PRD.md Task 4 specifications
 """
 
 from sqlalchemy import create_engine, Column, Integer, String, Float, DateTime, ForeignKey, JSON, BLOB
@@ -15,10 +14,7 @@ Base = declarative_base()
 
 
 class Card(Base):
-    """
-    Reference card from Scryfall dataset
-    Following PRD schema specification
-    """
+    """Reference card from Scryfall dataset."""
     __tablename__ = "cards"
 
     id = Column(String(100), primary_key=True)  # Unique card ID (scryfall_id or composite)
@@ -41,10 +37,7 @@ class Card(Base):
 
 
 class PhashVariant(Base):
-    """
-    pHash variants table (3 per card: full, name, collector)
-    Following PRD schema specification
-    """
+    """pHash variants table (3 per card: full, name, collector)."""
     __tablename__ = "phash_variants"
 
     id = Column(Integer, primary_key=True, autoincrement=True)

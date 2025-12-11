@@ -1,8 +1,6 @@
 """
 src/embeddings/embedder.py: CLIP embedding baseline
-Following PRD.md Task 5 specifications
-Uses CLIP ViT-B/32 for 512-dim image embeddings
-Now with composite embedding support for aligned retrieval/scoring
+Uses CLIP ViT-B/32 for 512-dim image embeddings with composite embedding support.
 """
 
 import torch
@@ -17,7 +15,6 @@ from src.embeddings.base_embedder import BaseEmbedder
 
 logger = logging.getLogger(__name__)
 
-# Default model per PRD
 DEFAULT_CLIP_MODEL = 'ViT-B-32'
 DEFAULT_PRETRAINED = 'openai'
 DEFAULT_EMBEDDING_DIM = 512

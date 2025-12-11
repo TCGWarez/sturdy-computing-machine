@@ -1,6 +1,5 @@
 """
 src/tests/test_indexer.py: Unit tests for indexer functionality
-Following PRD.md Task 12 specifications
 
 Tests:
 - Index building with fixtures

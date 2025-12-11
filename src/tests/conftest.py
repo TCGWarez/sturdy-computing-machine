@@ -1,6 +1,5 @@
 """
 src/tests/conftest.py: Pytest configuration and shared fixtures
-Following PRD.md Task 12 specifications
 
 Provides:
 - Common fixtures for testing

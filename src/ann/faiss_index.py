@@ -1,9 +1,6 @@
 """
 src/ann/faiss_index.py: FAISS-based ANN index wrapper
-Following PRD.md Task 6 specifications
-- Build persistent index from embeddings
-- Support build_index(embeddings) and query(embedding, top_k)
-- Serialize index files with metadata
+Supports building persistent indexes and querying for similar embeddings.
 """
 
 import faiss
@@ -19,10 +16,7 @@ from src.indexing.indexer import deserialize_embedding
 
 
 class FAISSIndex:
-    """
-    FAISS-based ANN index for fast similarity search
-    Following PRD.md specifications
-    """
+    """FAISS-based ANN index for fast similarity search."""
 
     def __init__(
         self,

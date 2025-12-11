@@ -36,12 +36,30 @@ uv run python scripts/download_default_cards.py --sets DMR CLB SLD
 ### 4. Index the Set
 
 ```bash
-uv run python scripts/index_set.py DMR
-uv run python scripts/index_set.py --all
-uv run python scripts/index_set.py DMR --device cuda
+uv run python scripts/index_set.py DMR              # Single set
+uv run python scripts/index_set.py DMR SLD NEO      # Multiple sets
+uv run python scripts/index_set.py --all            # All downloaded sets
+uv run python scripts/index_set.py DMR --device cuda  # GPU acceleration
+uv run python scripts/index_set.py --all --dry-run  # Preview what would be indexed
 ```
 
-### 5. Test Recognition
+Creates per-set FAISS indexes: `{SET}_nonfoil_composite.faiss` and `{SET}_foil_composite.faiss`
+
+### 5. Build Unified Index (Optional)
+
+Merge all per-set indexes into a single "ALL" index for cross-set search:
+
+```bash
+uv run python scripts/build_unified_index.py --finish nonfoil
+uv run python scripts/build_unified_index.py --finish foil
+uv run python scripts/build_unified_index.py --list-only  # See available indexes
+```
+
+Creates `ALL_nonfoil_composite.faiss` and `ALL_foil_composite.faiss`. Re-run after indexing new sets.
+
+**NOTE:** A pre-computed index, unified index and db is provided on a cdn. These files can be requested be contacting me on  [![Discord](https://img.shields.io/badge/My-Discord-%235865F2.svg)](https://discord.gg/tfbznkTnXN)
+
+### 6. Test Recognition
 
 ```bash
 uv run python scripts/recognize_card.py path/to/image.jpg --set DMR
@@ -51,7 +69,11 @@ uv run python scripts/recognize_card.py path/to/image.jpg --set DMR
 
 ```bash
 uv run uvicorn api.main:app --host 0.0.0.0 --port 8000 --reload
+                        or
+pip install uvicorn
+python -m uvicorn api.main:app --host 0.0.0.0 --port 8000 --reload
 ```
+
 
 Open http://localhost:8000 for batch recognition.
 
@@ -112,13 +134,11 @@ docker-compose up
 
 ## Technical Details
 
-### CLIP Embeddings
-- OpenCLIP ViT-B/32, 512-dim vectors
-- Composite: 70% full card, 20% collector region, 10% name region
-
-### pHash
-- 3 variants per card (full/name/collector)
-- Weighted: 60% full, 30% name, 10% collector
+### Indexing
+- Composite CLIP embedding: 70% full card + 20% collector region + 10% name region
+- 3 pHash variants per card (full/name/collector)
+- Auto-detects variant types (normal/extended_art/showcase/borderless)
+- Separate indexes for nonfoil and foil/etched finishes
 
 ### ORB Verification
 - Keypoint matching with Lowe's ratio test

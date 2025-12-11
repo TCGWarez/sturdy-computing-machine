@@ -1,6 +1,5 @@
 """
 src/tests/test_phash.py: Unit tests for pHash utilities
-Following PRD.md Task 12 specifications
 
 Tests:
 - Identical images should have Hamming distance 0
@@ -143,7 +142,6 @@ class TestPHashBasics:
         phash2 = compute_phash(path2)
 
         distance = hamming_distance(phash1, phash2)
-        # Similar images should have distance < 10 (PRD threshold)
         assert distance < 10, f"Similar images should have distance < 10, got {distance}"
 
     def test_different_images_have_large_distance(self, different_images):

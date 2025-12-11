@@ -1,15 +1,12 @@
 """
 src/recognition/matcher.py: Main card matching pipeline
+
 1. Input: scanned image path
-2. Detect and warp to canonical size using src/detection/card_detector.py
-3. Compute CLIP embedding using src/embeddings/embedder.py
-4. ANN search for top K=20 using src/ann/faiss_index.py or hnsw_index.py
-5. For top K, compute pHash distances for 3 variants and combine score:
-   - score = 0.6*(1-norm_embed_dist) + 0.3*(1-phash_norm) + 0.1*(ocr_score)
-   - Weights: α=0.6, β=0.3, γ=0.1 from PRD
-6. If top score > 0.85 (ACCEPT_THRESHOLD) → return match
-7. If ambiguous → run OCR on name + collector using src/recognition/ocr_utils.py
-8. Output: JSON with match_card_id, confidence, candidates list
+2. Detect and warp to canonical size
+3. Compute CLIP embedding
+4. ANN search for top K=20 candidates
+5. Score candidates: embedding (0.6) + pHash (0.3) + OCR (0.1)
+6. Return match if score > threshold, else flag for review
 """
 
 import cv2
@@ -165,10 +162,7 @@ def compute_clarity(candidates: List[MatchCandidate], threshold: float = CLARITY
 
 
 class CardMatcher:
-    """
-    Main card matching pipeline
-    Following PRD.md Task 9 specifications
-    """
+    """Main card matching pipeline."""
 
     def __init__(
         self,
@@ -384,8 +378,7 @@ class CardMatcher:
                 else:
                     phash_distances[variant_type] = 64  # Max distance if variant missing
 
-            # Compute pHash score (weighted combination)
-            # Following PRD: ph_score = 0.6*full + 0.3*name + 0.1*collector
+            # Compute pHash score (weighted: 0.6*full + 0.3*name + 0.1*collector)
             max_dist = 64.0
             phash_full_score = 1.0 - min(phash_distances['full'] / max_dist, 1.0)
             phash_name_score = 1.0 - min(phash_distances['name'] / max_dist, 1.0)

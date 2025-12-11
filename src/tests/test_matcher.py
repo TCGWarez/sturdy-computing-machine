@@ -1,6 +1,5 @@
 """
 src/tests/test_matcher.py: End-to-end tests for card matching
-Following PRD.md Task 12 specifications
 
 Tests:
 - End-to-end matching with fixtures (3 scans → expected card ids)
@@ -279,7 +278,6 @@ class TestScoringWeights:
 
     def test_default_weights(self):
         """Test default weights sum to reasonable range"""
-        # Default weights from PRD: α=0.6, β=0.3, γ=0.1
         weights = {'embedding': 0.6, 'phash': 0.3, 'ocr': 0.1}
 
         total = sum(weights.values())
@@ -322,7 +320,7 @@ class TestConfidenceThresholds:
     """Test confidence threshold logic"""
 
     def test_high_confidence_threshold(self):
-        """Test high confidence threshold (0.85 from PRD)"""
+        """Test high confidence threshold (0.85)"""
         from src.config import ACCEPT_THRESHOLD
 
         high_score = 0.90
@@ -332,7 +330,7 @@ class TestConfidenceThresholds:
         assert low_score < ACCEPT_THRESHOLD
 
     def test_manual_review_threshold(self):
-        """Test manual review threshold (0.65 from PRD)"""
+        """Test manual review threshold (0.65)"""
         from src.config import MANUAL_THRESHOLD
 
         ambiguous_score = 0.70

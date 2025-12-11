@@ -1,7 +1,6 @@
 """
 src/indexing/phash.py: Perceptual hashing utilities
-Computes pHash/dHash for fast candidate retrieval
-Enhanced with 3-variant support per PRD.md Task 3
+Computes pHash/dHash for fast candidate retrieval with 3-variant support.
 """
 
 import imagehash
@@ -195,7 +194,7 @@ def filter_by_hamming_distance(
 
 def compute_phash_variants(image: Union[Image.Image, str]) -> Dict[str, str]:
     """
-    Compute 3 pHash variants for a card image per PRD.md
+    Compute 3 pHash variants for a card image.
 
     Args:
         image: PIL Image or path to image file
@@ -241,8 +240,8 @@ def combine_phash_scores(
     weights: Tuple[float, float, float] = (0.6, 0.3, 0.1)
 ) -> float:
     """
-    Combine multiple pHash distances into a single score
-    Following PRD.md scoring: 0.6*full + 0.3*name + 0.1*collector
+    Combine multiple pHash distances into a single score.
+    Default weights: 0.6*full + 0.3*name + 0.1*collector
 
     Args:
         full_dist: Hamming distance for full image

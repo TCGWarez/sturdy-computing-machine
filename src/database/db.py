@@ -191,7 +191,6 @@ def rollback_transaction(db: Session):
     db.rollback()
 
 
-# New functions for PhashVariant and CompositeEmbedding tables (PRD.md schema)
 
 def get_phash_variants_by_card(db: Session, card_id: str) -> List[PhashVariant]:
     """
@@ -237,8 +236,7 @@ def search_cards_by_phash_variant(
     top_n: int = 200
 ) -> List[tuple]:
     """
-    Search cards by pHash variant with Hamming distance threshold
-    Following PRD.md specifications
+    Search cards by pHash variant with Hamming distance threshold.
 
     Args:
         db: Database session
@@ -352,8 +350,7 @@ def create_card_with_variants_and_embedding(
     commit: bool = True
 ) -> Card:
     """
-    Create a card with all its pHash variants and embedding in one transaction
-    Following PRD.md schema
+    Create a card with all its pHash variants and embedding in one transaction.
 
     Args:
         db: Database session

@@ -1,12 +1,10 @@
 """
 src/indexing/indexer.py: Main indexing pipeline
-Following PRD.md Task 4 specifications
-- Uses CLIP embedder (not CNN)
+
+- Uses CLIP embedder for 512-dim embeddings
 - Skips detection for Scryfall images (already cropped)
 - Computes 3 pHash variants (full, name, collector)
-- Stores all variants in phash_variants table
-- Stores CLIP embedding (512-dim) in embeddings table as BLOB
-- Builds FAISS/HNSW index for vector search
+- Builds FAISS index for vector search
 """
 
 import numpy as np
@@ -61,10 +59,7 @@ def deserialize_embedding(blob: bytes) -> np.ndarray:
 
 
 class Indexer:
-    """
-    Main indexing pipeline for building searchable index of card images
-    Following PRD.md specifications
-    """
+    """Main indexing pipeline for building searchable index of card images."""
 
     def __init__(
         self,
@@ -90,7 +85,7 @@ class Indexer:
         init_db()
         self.db = SessionLocal()
 
-        # Initialize CLIP embedder (512-dim as per PRD)
+        # Initialize CLIP embedder (512-dim)
         logger.info("Initializing CLIP embedder...")
         self.embedder = CLIPEmbedder(device=device, checkpoint_path=checkpoint_path)
         self.embedding_dim = self.embedder.embedding_dim
@@ -145,7 +140,7 @@ class Indexer:
         CRITICAL: This must match the scanned image preprocessing in matcher.py
         Both pipelines must produce identical 363x504 images for CLIP to work.
 
-        Per PRD: Skip detection since Scryfall images are already cropped
+        Scryfall images are already cropped, so skip detection.
 
         Args:
             image_path: Path to Scryfall image
@@ -199,7 +194,7 @@ class Indexer:
                 logger.debug(f"Skipping already indexed: {image_path.name}")
                 return None
 
-            # Normalize image (skip detection per PRD - Scryfall images already cropped)
+            # Normalize image (Scryfall images already cropped)
             normalized_img = self.normalize_scryfall_image(image_path)
 
             # Compute 3 pHash variants (full, name, collector)

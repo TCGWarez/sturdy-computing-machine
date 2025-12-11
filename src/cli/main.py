@@ -1,6 +1,5 @@
 """
 src/cli/main.py: CLI entry point using Click
-Following PRD.md Task 10 specifications
 
 Commands:
 - index --set M21 - Build indices
@@ -25,11 +24,7 @@ logger = logging.getLogger(__name__)
 
 @click.group()
 def cli():
-    """
-    MTG Card Recognition System CLI
-
-    Production-ready commands following PRD.md specifications
-    """
+    """MTG Card Recognition System CLI"""
     pass
 
 

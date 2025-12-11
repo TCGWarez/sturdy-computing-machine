@@ -1,6 +1,5 @@
 """
 src/tests/test_detector.py: Unit tests for card detection and warping
-Following PRD.md Task 12 specifications
 
 Tests:
 - Synthetic warp tests with known transforms
