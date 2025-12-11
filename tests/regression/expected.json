@@ -1,0 +1,26 @@
+{
+  "20241105-MTG-0859F.jpg": {
+    "card_name": "Cabaretti Ascendancy",
+    "collector_number": "299",
+    "confidence": 1.0,
+    "set_code": "SNC"
+  },
+  "348_screamingnemesis.jpg": {
+    "card_name": "Screaming Nemesis",
+    "collector_number": "348",
+    "confidence": 1.0,
+    "set_code": "DSK"
+  },
+  "altarofbhaal.jpg": {
+    "card_name": "Altar of Bhaal    Bone Offering",
+    "collector_number": "569",
+    "confidence": 1.0,
+    "set_code": "CLB"
+  },
+  "skinner.jpg": {
+    "card_name": "The Mindskinner",
+    "collector_number": "357",
+    "confidence": 1.0,
+    "set_code": "DSK"
+  }
+}

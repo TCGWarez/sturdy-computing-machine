@@ -1,0 +1,206 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>MTG Card Recognition - Batch Upload</title>
+    <link rel="stylesheet" href="/static/css/style.css">
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>🃏 MTG Card Recognition</h1>
+            <p class="subtitle">Upload card images for automatic recognition</p>
+        </header>
+
+        <main>
+            <div class="upload-section">
+                <div id="dropZone" class="drop-zone">
+                    <svg class="upload-icon" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" />
+                    </svg>
+                    <h2>Drag & Drop Images Here</h2>
+                    <p>or click to browse</p>
+                    <p class="file-types">Supports: JPG, PNG, or ZIP file</p>
+                    <input type="file" id="fileInput" multiple accept="image/*,.zip" style="display: none;">
+                </div>
+
+                <div id="fileList" class="file-list" style="display: none;">
+                    <h3>Selected Files</h3>
+                    <ul id="filesUl"></ul>
+                </div>
+
+                <div class="options">
+                    <label for="setCode">Set Code (optional):</label>
+                    <input type="text" id="setCode" placeholder="e.g., TLA, DMR, SLD" maxlength="10">
+                    <p class="hint">Filtering by set improves speed and accuracy</p>
+                </div>
+
+                <div class="options">
+                    <label>Card Finish:</label>
+                    <div class="finish-selector">
+                        <label class="radio-option">
+                            <input type="radio" name="finish" value="nonfoil" checked>
+                            <span>Nonfoil</span>
+                        </label>
+                        <label class="radio-option">
+                            <input type="radio" name="finish" value="foil">
+                            <span>Foil</span>
+                        </label>
+                    </div>
+                    <p class="hint">Select the finish type of your cards</p>
+                </div>
+
+                <button id="uploadBtn" class="btn btn-primary" disabled>
+                    Start Recognition
+                </button>
+            </div>
+
+            <div id="progressSection" class="progress-section" style="display: none;">
+                <h2>Processing Batch...</h2>
+                <div class="progress-bar">
+                    <div id="progressFill" class="progress-fill"></div>
+                </div>
+                <p id="progressText">0 / 0 cards processed</p>
+            </div>
+        </main>
+    </div>
+
+    <script>
+        const dropZone = document.getElementById('dropZone');
+        const fileInput = document.getElementById('fileInput');
+        const uploadBtn = document.getElementById('uploadBtn');
+        const fileList = document.getElementById('fileList');
+        const filesUl = document.getElementById('filesUl');
+        const setCodeInput = document.getElementById('setCode');
+        const progressSection = document.getElementById('progressSection');
+        const progressFill = document.getElementById('progressFill');
+        const progressText = document.getElementById('progressText');
+
+        let selectedFiles = [];
+
+        // Drag and drop handlers
+        dropZone.addEventListener('click', () => fileInput.click());
+
+        dropZone.addEventListener('dragover', (e) => {
+            e.preventDefault();
+            dropZone.classList.add('drag-over');
+        });
+
+        dropZone.addEventListener('dragleave', () => {
+            dropZone.classList.remove('drag-over');
+        });
+
+        dropZone.addEventListener('drop', (e) => {
+            e.preventDefault();
+            dropZone.classList.remove('drag-over');
+            handleFiles(e.dataTransfer.files);
+        });
+
+        fileInput.addEventListener('change', (e) => {
+            handleFiles(e.target.files);
+        });
+
+        function handleFiles(files) {
+            selectedFiles = Array.from(files);
+
+            if (selectedFiles.length > 0) {
+                fileList.style.display = 'block';
+                filesUl.innerHTML = '';
+
+                selectedFiles.forEach(file => {
+                    const li = document.createElement('li');
+                    li.textContent = `${file.name} (${formatBytes(file.size)})`;
+                    filesUl.appendChild(li);
+                });
+
+                uploadBtn.disabled = false;
+            }
+        }
+
+        function formatBytes(bytes) {
+            if (bytes < 1024) return bytes + ' B';
+            if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + ' KB';
+            return (bytes / (1024 * 1024)).toFixed(1) + ' MB';
+        }
+
+        // Upload handler
+        uploadBtn.addEventListener('click', async () => {
+            if (selectedFiles.length === 0) return;
+
+            uploadBtn.disabled = true;
+            uploadBtn.textContent = 'Uploading...';
+
+            const formData = new FormData();
+            selectedFiles.forEach(file => {
+                formData.append('files', file);
+            });
+
+            const setCode = setCodeInput.value.trim().toUpperCase();
+            const finish = document.querySelector('input[name="finish"]:checked').value;
+
+            const params = new URLSearchParams();
+            if (setCode) params.append('set_code', setCode);
+            if (finish) params.append('finish', finish);
+
+            const url = params.toString()
+                ? `/api/batch/upload?${params.toString()}`
+                : '/api/batch/upload';
+
+            try {
+                const response = await fetch(url, {
+                    method: 'POST',
+                    body: formData
+                });
+
+                if (!response.ok) {
+                    throw new Error('Upload failed');
+                }
+
+                const data = await response.json();
+
+                // Show progress section
+                document.querySelector('.upload-section').style.display = 'none';
+                progressSection.style.display = 'block';
+
+                // Start polling for progress
+                pollProgress(data.batch_id);
+
+            } catch (error) {
+                alert('Upload failed: ' + error.message);
+                uploadBtn.disabled = false;
+                uploadBtn.textContent = 'Start Recognition';
+            }
+        });
+
+        async function pollProgress(batchId) {
+            const checkProgress = async () => {
+                try {
+                    const response = await fetch(`/api/batch/${batchId}/status`);
+                    const data = await response.json();
+
+                    const percent = (data.processed_cards / data.total_cards) * 100;
+                    progressFill.style.width = percent + '%';
+                    progressText.textContent = `${data.processed_cards} / ${data.total_cards} cards processed`;
+
+                    if (data.status === 'completed') {
+                        // Redirect to results page
+                        window.location.href = `/batch/${batchId}`;
+                    } else if (data.status === 'failed') {
+                        alert('Batch processing failed. Please try again.');
+                        location.reload();
+                    } else {
+                        // Continue polling
+                        setTimeout(checkProgress, 2000);
+                    }
+                } catch (error) {
+                    console.error('Error checking progress:', error);
+                    setTimeout(checkProgress, 2000);
+                }
+            };
+
+            checkProgress();
+        }
+    </script>
+</body>
+</html>

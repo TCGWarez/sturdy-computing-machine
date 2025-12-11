@@ -1,0 +1,83 @@
+# .dockerignore - exclude unnecessary files from Docker build context
+
+# Python cache and build artifacts
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+pip-wheel-metadata/
+share/python-wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# Virtual environments
+venv/
+ENV/
+env/
+uploads/*
+# IDEs
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Git
+.git/
+.gitignore
+
+# Testing
+.pytest_cache/
+.coverage
+htmlcov/
+.tox/
+
+# Data (large files, should be mounted as volumes)
+data/scryfall/*
+data/scanned/*
+data/indexes/*.faiss
+data/indexes/*.hnsw
+data/models/*.pth
+data/feedback/*
+logs/*
+
+# Keep structure but exclude contents
+!data/scryfall/.gitkeep
+!data/scanned/.gitkeep
+!data/indexes/.gitkeep
+!data/models/.gitkeep
+!data/feedback/.gitkeep
+!logs/.gitkeep
+
+# Environment files
+.env
+
+# Documentation build
+docs/_build/
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Jupyter notebooks
+*.ipynb_checkpoints
+
+# Temporary files
+*.tmp
+*.log
+debug_*.jpg
+debug_*.json

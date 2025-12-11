@@ -1,0 +1,79 @@
+version: '3.8'
+
+services:
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: mtg-recognition:latest
+    container_name: mtg-recognition-api
+    ports:
+      - "${API_PORT:-8000}:8000"
+    volumes:
+      - ./data:/app/data
+      - ./uploads:/app/uploads
+      - ./logs:/app/logs
+    environment:
+      - PYTHONUNBUFFERED=1
+      - DATABASE_PATH=/app/data/mtg_recognition.db
+      - SCRYFALL_IMAGES_DIR=/app/data/scryfall
+      - INDEXES_DIR=/app/data/indexes
+      - MODELS_DIR=/app/data/models
+      - LOG_DIR=/app/logs
+      - ACCEPT_THRESHOLD=${ACCEPT_THRESHOLD:-0.85}
+      - MANUAL_THRESHOLD=${MANUAL_THRESHOLD:-0.65}
+      - CLARITY_THRESHOLD=${CLARITY_THRESHOLD:-0.10}
+      - FAISS_TOP_K=${FAISS_TOP_K:-20}
+      - LOG_LEVEL=${LOG_LEVEL:-INFO}
+      - MTGSOLD_API_BASE=${MTGSOLD_API_BASE:-}
+      - MTGSOLD_API_TOKEN=${MTGSOLD_API_TOKEN:-}
+    command: ["uvicorn", "api.main:app", "--host", "0.0.0.0", "--port", "8000"]
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          memory: 4G
+        reservations:
+          memory: 2G
+    networks:
+      - mtg-network
+
+  cli:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: mtg-recognition:latest
+    volumes:
+      - ./data:/app/data
+      - ./logs:/app/logs
+    environment:
+      - PYTHONUNBUFFERED=1
+      - DATABASE_PATH=/app/data/mtg_recognition.db
+      - SCRYFALL_IMAGES_DIR=/app/data/scryfall
+      - INDEXES_DIR=/app/data/indexes
+      - MODELS_DIR=/app/data/models
+      - LOG_DIR=/app/logs
+      - INDEXING_BATCH_SIZE=${INDEXING_BATCH_SIZE:-100}
+      - LOG_LEVEL=${LOG_LEVEL:-INFO}
+    profiles:
+      - cli
+    networks:
+      - mtg-network
+
+networks:
+  mtg-network:
+    driver: bridge
+
+# Usage:
+#
+# Start API server:
+#   docker-compose up -d api
+#
+# Index a set:
+#   docker-compose run --rm cli python scripts/index_set.py DMR
+#
+# Download cards:
+#   docker-compose run --rm cli python scripts/download_default_cards.py --sets DMR
+#
+# Recognize a card:
+#   docker-compose run --rm cli python scripts/recognize_card.py /app/data/scan.jpg --set DMR

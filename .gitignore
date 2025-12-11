@@ -1,0 +1,63 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+.claude/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+./playwright-mcp
+
+# Virtual environments
+venv/
+env/
+ENV/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+null
+# Environment variables
+.env
+.env.local
+
+# Data directories
+data/
+*.db
+*.sqlite
+*.sqlite3
+
+# Model checkpoints
+*.pth
+*.pt
+*.ckpt
+
+# Logs
+logs/
+*.log
+
+# FAISS indexes
+*.index
+*.mappings.pkl
+
+# OS
+.DS_Store
+Thumbs.db
+

@@ -1,0 +1,948 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Batch Results - MTG Card Recognition</title>
+    <link rel="stylesheet" href="/static/css/style.css">
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>Batch Results</h1>
+            <div class="header-actions">
+                <button onclick="enterReviewMode()" class="btn btn-primary" id="reviewModeBtn">Review Mode</button>
+                <button onclick="exportResults('csv')" class="btn btn-secondary">Export CSV</button>
+                <button onclick="exportResults('json')" class="btn btn-secondary">Export JSON</button>
+                <button id="exportManapoolBtn" onclick="exportResults('manapool_csv')" class="btn btn-secondary" style="display: none;">Export Manapool CSV</button>
+                <a href="/" class="btn btn-secondary">New Batch</a>
+            </div>
+        </header>
+
+        <div class="stats">
+            <div class="stat-card">
+                <h3 id="totalCards">0</h3>
+                <p>Total Cards</p>
+            </div>
+            <div class="stat-card stat-high">
+                <h3 id="highConfidence">0</h3>
+                <p>High Confidence (≥90%)</p>
+            </div>
+            <div class="stat-card stat-medium">
+                <h3 id="mediumConfidence">0</h3>
+                <p>Medium (70-89%)</p>
+            </div>
+            <div class="stat-card stat-low">
+                <h3 id="lowConfidence">0</h3>
+                <p>Low (<70%)</p>
+            </div>
+            <div class="stat-card stat-ambiguous">
+                <h3 id="ambiguousCount">0</h3>
+                <p>Ambiguous</p>
+            </div>
+        </div>
+
+        <main>
+            <!-- Grid View (default) -->
+            <div id="resultsGrid" class="results-grid">
+                <!-- Results will be populated here -->
+            </div>
+
+            <!-- Review Mode (hidden by default) -->
+            <div id="reviewMode" class="review-mode" style="display: none;">
+                <!-- Single unified review card -->
+                <div class="review-card">
+                    <!-- Header: Navigation + Progress -->
+                    <div class="review-header">
+                        <button onclick="prevCard()" class="nav-btn" id="prevBtn">
+                            <span class="nav-arrow">←</span>
+                        </button>
+                        <div class="review-progress-info">
+                            <span id="reviewProgress">Card 1 of 47</span>
+                            <label class="filter-toggle">
+                                <input type="checkbox" id="filterLowConfidence" onchange="toggleFilter()">
+                                <span>Low confidence only</span>
+                            </label>
+                        </div>
+                        <button onclick="nextCard()" class="nav-btn" id="nextBtn">
+                            <span class="nav-arrow">→</span>
+                        </button>
+                    </div>
+
+                    <!-- Main: Comparison + Match Info -->
+                    <div class="review-body">
+                        <div class="comparison-area">
+                            <div class="image-panel scanned-panel">
+                                <img id="reviewScannedImg" src="" alt="Scanned card">
+                                <span class="image-label">SCAN</span>
+                                <p class="filename" id="reviewFilename"></p>
+                            </div>
+
+                            <div class="comparison-divider">
+                                <span class="vs-badge">VS</span>
+                            </div>
+
+                            <div class="image-panel matched-panel">
+                                <img id="reviewReferenceImg" src="" alt="Matched card">
+                                <span class="image-label">MATCH</span>
+                            </div>
+                        </div>
+
+                        <div class="match-details">
+                            <h2 id="reviewCardName" class="card-title"></h2>
+                            <p id="reviewCardMeta" class="card-meta"></p>
+
+                            <!-- Color-coded confidence -->
+                            <div class="confidence-display" id="confidenceDisplay">
+                                <div class="confidence-bar-large">
+                                    <div id="reviewConfidenceFill" class="confidence-fill-large"></div>
+                                </div>
+                                <span class="confidence-value" id="reviewConfidenceValue">87%</span>
+                            </div>
+
+                            <!-- Ambiguous warning badge -->
+                            <div id="ambiguousBadge" class="status-badge warning" style="display: none;">
+                                <span>⚠</span> <span id="ambiguousCountBadge">3</span> similar cards found
+                            </div>
+
+                            <!-- Corrected badge -->
+                            <div id="correctedBadge" class="status-badge success" style="display: none;">
+                                ✓ Corrected
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Actions: Primary actions + inline search -->
+                    <div class="review-actions">
+                        <button onclick="acceptAndNext()" class="btn btn-accept" id="acceptBtn">
+                            ✓ Accept & Next
+                        </button>
+                        <button onclick="nextCard()" class="btn btn-skip">
+                            Skip →
+                        </button>
+                        <div class="inline-search-wrapper">
+                            <input type="text" id="inlineSearchInput"
+                                   placeholder="Search for correct card..."
+                                   class="inline-search-input">
+                            <select id="inlineSetFilter" class="set-filter-select">
+                                <option value="">All Sets</option>
+                            </select>
+                            <span class="search-icon">🔍</span>
+                        </div>
+                    </div>
+
+                    <!-- Candidates: Alternative matches -->
+                    <div class="candidates-section">
+                        <p class="candidates-label">Not right? Pick one:</p>
+                        <div id="candidateGrid" class="candidate-grid"></div>
+                        <div id="inlineSearchResults" class="search-results-grid" style="display: none;"></div>
+                        <button id="loadMoreInline" class="btn btn-secondary load-more-btn" style="display: none;">Load More</button>
+                    </div>
+
+                    <!-- Footer: Keyboard hints -->
+                    <div class="keyboard-hints">
+                        <kbd>←</kbd><kbd>→</kbd> navigate
+                        <span class="hint-sep">•</span>
+                        <kbd>1</kbd>-<kbd>5</kbd> select
+                        <span class="hint-sep">•</span>
+                        <kbd>Enter</kbd> accept
+                        <span class="hint-sep">•</span>
+                        <kbd>Esc</kbd> exit
+                    </div>
+                </div>
+            </div>
+        </main>
+    </div>
+
+    <!-- Correction Modal -->
+    <div id="correctionModal" class="modal" style="display: none;">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2>Correct Card Match</h2>
+                <button class="modal-close" onclick="closeModal()">&times;</button>
+            </div>
+            <div class="modal-body">
+                <div class="modal-grid">
+                    <div class="modal-section">
+                        <h3>Scanned Image</h3>
+                        <img id="modalScannedImage" class="modal-image" alt="Scanned card">
+                        <p id="modalFilename" class="text-sm"></p>
+                    </div>
+                    <div class="modal-section">
+                        <h3>Current Match</h3>
+                        <div id="modalCurrentMatch"></div>
+                    </div>
+                </div>
+
+                <div class="correction-section">
+                    <h3>Search for Correct Card</h3>
+                    <div class="search-controls">
+                        <input type="text" id="searchInput" placeholder="Type card name..." class="search-input">
+                        <select id="modalSetFilter" class="set-filter-select">
+                            <option value="">All Sets</option>
+                        </select>
+                    </div>
+                    <div id="searchResults" class="search-results"></div>
+                    <button id="loadMoreModal" class="btn btn-secondary load-more-btn" style="display: none;">Load More</button>
+                </div>
+
+                <div class="correction-reason">
+                    <label for="correctionReason">Reason (optional):</label>
+                    <input type="text" id="correctionReason" placeholder="e.g., Wrong variant, Different finish">
+                </div>
+
+                <div class="modal-actions">
+                    <button onclick="closeModal()" class="btn btn-secondary">Cancel</button>
+                    <button id="saveCorrection" class="btn btn-primary" disabled>Save Correction</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const batchId = window.location.pathname.split('/').pop();
+        let batchResults = [];
+        let currentImageId = null;
+        let selectedCardId = null;
+
+        // MTGSold toggle from backend
+        const mtgsoldEnabled = {{ 'true' if mtgsold_enabled else 'false' }};
+
+        // Load results and sets on page load
+        window.addEventListener('DOMContentLoaded', () => {
+            loadResults();
+            loadSetFilters();
+            // Toggle Manapool export button
+            const manaBtn = document.getElementById('exportManapoolBtn');
+            if (manaBtn) {
+                manaBtn.style.display = mtgsoldEnabled ? 'inline-flex' : 'none';
+            }
+        });
+
+        async function loadSetFilters() {
+            try {
+                const response = await fetch('/api/batch/sets');
+                const sets = await response.json();
+
+                const modalSelect = document.getElementById('modalSetFilter');
+                const inlineSelect = document.getElementById('inlineSetFilter');
+
+                sets.forEach(setCode => {
+                    const option1 = document.createElement('option');
+                    option1.value = setCode;
+                    option1.textContent = setCode.toUpperCase();
+                    modalSelect.appendChild(option1);
+
+                    const option2 = document.createElement('option');
+                    option2.value = setCode;
+                    option2.textContent = setCode.toUpperCase();
+                    inlineSelect.appendChild(option2);
+                });
+            } catch (error) {
+                console.error('Error loading sets:', error);
+            }
+        }
+
+        async function loadResults() {
+            try {
+                const response = await fetch(`/api/batch/${batchId}/results`);
+                const data = await response.json();
+
+                batchResults = data.results;
+
+                // Update stats
+                updateStats(data.results);
+
+                // Render results grid
+                renderResults(data.results);
+
+            } catch (error) {
+                console.error('Error loading results:', error);
+                alert('Failed to load results');
+            }
+        }
+
+        function updateStats(results) {
+            const total = results.length;
+            const high = results.filter(r => r.confidence >= 0.9).length;
+            const medium = results.filter(r => r.confidence >= 0.7 && r.confidence < 0.9).length;
+            const low = results.filter(r => r.confidence < 0.7).length;
+            const ambiguous = results.filter(r => r.is_ambiguous).length;
+
+            document.getElementById('totalCards').textContent = total;
+            document.getElementById('highConfidence').textContent = high;
+            document.getElementById('mediumConfidence').textContent = medium;
+            document.getElementById('lowConfidence').textContent = low;
+            document.getElementById('ambiguousCount').textContent = ambiguous;
+        }
+
+        function renderResults(results) {
+            const grid = document.getElementById('resultsGrid');
+            grid.innerHTML = '';
+
+            results.forEach(result => {
+                const card = createCardElement(result);
+                grid.appendChild(card);
+            });
+        }
+
+        function createCardElement(result) {
+            const card = document.createElement('div');
+            const ambiguousClass = result.is_ambiguous ? ' ambiguous' : '';
+            card.className = `card-result ${getConfidenceClass(result.confidence)}${ambiguousClass}`;
+
+            const confidenceClass = result.confidence >= 0.9 ? 'high' : (result.confidence >= 0.7 ? 'medium' : 'low');
+
+            // Build badges
+            let badges = '';
+            if (result.is_ambiguous) {
+                const otherCount = (result.candidates?.length || 0);
+                badges += `<span class="ambiguous-badge" title="Multiple strong matches (clarity: ${(result.clarity_score * 100).toFixed(0)}%)">⚠ ${otherCount} similar</span>`;
+            }
+            if (result.is_corrected) {
+                badges += '<span class="corrected-badge">Corrected</span>';
+            }
+
+            card.innerHTML = `
+                <div class="card-images">
+                    <img src="${result.image_url}" alt="${result.image_filename}" class="scan-thumbnail">
+                    <span class="match-arrow">→</span>
+                    <img src="${result.reference_image_url || ''}" alt="${result.card_name}" class="reference-thumbnail" onerror="this.style.display='none'">
+                </div>
+                <div class="card-info">
+                    <h3>${result.card_name}</h3>
+                    <p class="card-meta">${result.set_code} #${result.collector_number} • ${result.finish}</p>
+                    <div class="confidence-wrapper">
+                        <div class="confidence-bar">
+                            <div class="confidence-fill ${confidenceClass}" style="width: ${result.confidence * 100}%"></div>
+                        </div>
+                        <span class="confidence-text">${(result.confidence * 100).toFixed(1)}%</span>
+                    </div>
+                    <div class="card-badges">${badges}</div>
+                </div>
+                <button class="btn btn-small btn-secondary" onclick="openCorrection('${result.image_id}')">
+                    ${result.is_corrected ? 'Change' : 'Correct'}
+                </button>
+            `;
+
+            return card;
+        }
+
+        function getConfidenceClass(confidence) {
+            if (confidence >= 0.9) return 'confidence-high';
+            if (confidence >= 0.7) return 'confidence-medium';
+            return 'confidence-low';
+        }
+
+        function openCorrection(imageId) {
+            currentImageId = imageId;
+            const result = batchResults.find(r => r.image_id === imageId);
+
+            if (!result) return;
+
+            // Populate modal
+            document.getElementById('modalScannedImage').src = result.image_url;
+            document.getElementById('modalFilename').textContent = result.image_filename;
+            document.getElementById('modalCurrentMatch').innerHTML = `
+                <div class="current-match-info">
+                    <h4>${result.card_name}</h4>
+                    <p>${result.set_code} #${result.collector_number}</p>
+                    <p class="confidence-label">${(result.confidence * 100).toFixed(1)}% confidence</p>
+                </div>
+            `;
+
+            // Show modal
+            document.getElementById('correctionModal').style.display = 'flex';
+
+            // Focus search input
+            document.getElementById('searchInput').focus();
+        }
+
+        function closeModal() {
+            document.getElementById('correctionModal').style.display = 'none';
+            document.getElementById('searchInput').value = '';
+            document.getElementById('searchResults').innerHTML = '';
+            document.getElementById('correctionReason').value = '';
+            document.getElementById('loadMoreModal').style.display = 'none';
+            document.getElementById('modalSetFilter').value = '';
+            selectedCardId = null;
+            modalSearchState = { query: '', offset: 0, hasMore: false };
+        }
+
+        // Card search with debounce
+        let searchTimeout;
+        let modalSearchState = { query: '', offset: 0, hasMore: false };
+
+        document.getElementById('searchInput').addEventListener('input', (e) => {
+            clearTimeout(searchTimeout);
+            const query = e.target.value.trim();
+
+            if (query.length < 2) {
+                document.getElementById('searchResults').innerHTML = '';
+                document.getElementById('loadMoreModal').style.display = 'none';
+                return;
+            }
+
+            searchTimeout = setTimeout(() => {
+                modalSearchState = { query, offset: 0, hasMore: false };
+                searchCards(query, false);
+            }, 300);
+        });
+
+        // Set filter change triggers new search
+        document.getElementById('modalSetFilter').addEventListener('change', () => {
+            const query = document.getElementById('searchInput').value.trim();
+            if (query.length >= 2) {
+                modalSearchState = { query, offset: 0, hasMore: false };
+                searchCards(query, false);
+            }
+        });
+
+        // Load more button
+        document.getElementById('loadMoreModal').addEventListener('click', () => {
+            searchCards(modalSearchState.query, true);
+        });
+
+        async function searchCards(query, append = false) {
+            const setFilter = document.getElementById('modalSetFilter').value;
+            const limit = 30;
+            const offset = append ? modalSearchState.offset : 0;
+
+            let url = `/api/batch/search?query=${encodeURIComponent(query)}&limit=${limit}&offset=${offset}`;
+            if (setFilter) {
+                url += `&set_code=${encodeURIComponent(setFilter)}`;
+            }
+
+            try {
+                const response = await fetch(url);
+                const cards = await response.json();
+
+                const resultsDiv = document.getElementById('searchResults');
+                const loadMoreBtn = document.getElementById('loadMoreModal');
+
+                if (!append) {
+                    resultsDiv.innerHTML = '';
+                }
+
+                cards.forEach(card => {
+                    const cardDiv = document.createElement('div');
+                    cardDiv.className = 'search-result-item';
+                    cardDiv.innerHTML = `
+                        <div>
+                            <strong>${card.card_name}</strong>
+                            <span class="text-sm">${card.set_code} #${card.collector_number} • ${card.finish}</span>
+                        </div>
+                    `;
+                    cardDiv.onclick = () => selectCard(card);
+                    resultsDiv.appendChild(cardDiv);
+                });
+
+                if (cards.length === 0 && !append) {
+                    resultsDiv.innerHTML = '<p class="no-results">No cards found</p>';
+                    loadMoreBtn.style.display = 'none';
+                    return;
+                }
+
+                // Update pagination state
+                modalSearchState.offset = offset + cards.length;
+                modalSearchState.hasMore = cards.length === limit;
+                loadMoreBtn.style.display = modalSearchState.hasMore ? 'block' : 'none';
+
+            } catch (error) {
+                console.error('Search error:', error);
+            }
+        }
+
+        function selectCard(card) {
+            selectedCardId = card.card_id;
+
+            // Highlight selected
+            document.querySelectorAll('.search-result-item').forEach(item => {
+                item.classList.remove('selected');
+            });
+            event.target.closest('.search-result-item').classList.add('selected');
+
+            // Enable save button
+            document.getElementById('saveCorrection').disabled = false;
+        }
+
+        document.getElementById('saveCorrection').addEventListener('click', async () => {
+            if (!selectedCardId) return;
+
+            const reason = document.getElementById('correctionReason').value;
+
+            try {
+                const response = await fetch(`/api/batch/${batchId}/correct`, {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({
+                        image_id: currentImageId,
+                        correct_card_id: selectedCardId,
+                        reason: reason || null
+                    })
+                });
+
+                if (!response.ok) throw new Error('Correction failed');
+
+                // Reload results
+                await loadResults();
+                closeModal();
+
+            } catch (error) {
+                console.error('Correction error:', error);
+                alert('Failed to save correction');
+            }
+        });
+
+        async function exportResults(format) {
+            const url = `/api/batch/${batchId}/export?format=${format}`;
+            window.location.href = url;
+        }
+
+        // ============================================
+        // REVIEW MODE
+        // ============================================
+        let isReviewMode = false;
+        let currentReviewIndex = 0;
+        let filteredResults = [];
+        let filterLowConfidence = false;
+
+        function enterReviewMode() {
+            if (batchResults.length === 0) {
+                alert('No results to review');
+                return;
+            }
+
+            isReviewMode = true;
+            filterLowConfidence = false;
+            document.getElementById('filterLowConfidence').checked = false;
+            applyFilter();
+
+            document.getElementById('resultsGrid').style.display = 'none';
+            document.querySelector('.stats').style.display = 'none';
+            document.getElementById('reviewMode').style.display = 'block';
+            document.getElementById('reviewModeBtn').textContent = 'Exit Review';
+            document.getElementById('reviewModeBtn').onclick = exitReviewMode;
+
+            renderCurrentReviewCard();
+            document.addEventListener('keydown', handleReviewKeyboard);
+        }
+
+        function exitReviewMode() {
+            isReviewMode = false;
+            document.getElementById('reviewMode').style.display = 'none';
+            document.getElementById('resultsGrid').style.display = 'grid';
+            document.querySelector('.stats').style.display = 'flex';
+            document.getElementById('reviewModeBtn').textContent = 'Review Mode';
+            document.getElementById('reviewModeBtn').onclick = enterReviewMode;
+
+            document.removeEventListener('keydown', handleReviewKeyboard);
+        }
+
+        function applyFilter() {
+            if (filterLowConfidence) {
+                filteredResults = batchResults.filter(r => r.confidence < 0.7);
+            } else {
+                filteredResults = [...batchResults];
+            }
+            currentReviewIndex = 0;
+
+            if (filteredResults.length === 0 && filterLowConfidence) {
+                alert('No low confidence cards to review!');
+                document.getElementById('filterLowConfidence').checked = false;
+                filterLowConfidence = false;
+                filteredResults = [...batchResults];
+            }
+        }
+
+        function toggleFilter() {
+            filterLowConfidence = document.getElementById('filterLowConfidence').checked;
+            applyFilter();
+            renderCurrentReviewCard();
+        }
+
+        function renderCurrentReviewCard() {
+            if (filteredResults.length === 0) return;
+
+            const result = filteredResults[currentReviewIndex];
+
+            // Update progress
+            const lowCount = batchResults.filter(r => r.confidence < 0.7).length;
+            document.getElementById('reviewProgress').textContent =
+                `Card ${currentReviewIndex + 1} of ${filteredResults.length}` +
+                (lowCount > 0 ? ` (${lowCount} need review)` : '');
+
+            // Update images
+            document.getElementById('reviewScannedImg').src = result.image_url;
+            document.getElementById('reviewFilename').textContent = result.image_filename;
+
+            // Reference image
+            if (result.reference_image_url) {
+                document.getElementById('reviewReferenceImg').src = result.reference_image_url;
+            } else {
+                document.getElementById('reviewReferenceImg').src = '';
+            }
+
+            // Update info
+            document.getElementById('reviewCardName').textContent = result.card_name;
+            document.getElementById('reviewCardMeta').textContent =
+                `${result.set_code} #${result.collector_number} • ${result.finish}`;
+
+            // Color-coded confidence
+            const confidence = result.confidence;
+            const fill = document.getElementById('reviewConfidenceFill');
+            const display = document.getElementById('confidenceDisplay');
+
+            fill.style.width = `${confidence * 100}%`;
+
+            // Remove old classes and add appropriate one
+            display.classList.remove('confidence-high', 'confidence-medium', 'confidence-low');
+            if (confidence >= 0.9) {
+                display.classList.add('confidence-high');
+            } else if (confidence >= 0.7) {
+                display.classList.add('confidence-medium');
+            } else {
+                display.classList.add('confidence-low');
+            }
+
+            document.getElementById('reviewConfidenceValue').textContent =
+                `${(confidence * 100).toFixed(0)}%`;
+
+            // Show/hide ambiguous badge
+            const ambiguousBadge = document.getElementById('ambiguousBadge');
+            if (result.is_ambiguous && result.candidates?.length > 0) {
+                ambiguousBadge.style.display = 'inline-flex';
+                document.getElementById('ambiguousCountBadge').textContent = result.candidates.length;
+            } else {
+                ambiguousBadge.style.display = 'none';
+            }
+
+            // Show/hide corrected badge
+            document.getElementById('correctedBadge').style.display =
+                result.is_corrected ? 'inline-flex' : 'none';
+
+            // Disable prev/next at boundaries
+            document.getElementById('prevBtn').disabled = currentReviewIndex === 0;
+            document.getElementById('nextBtn').disabled = currentReviewIndex >= filteredResults.length - 1;
+
+            // Render candidates
+            renderCandidates(result.candidates || []);
+        }
+
+        function renderCandidates(candidates) {
+            const grid = document.getElementById('candidateGrid');
+            grid.innerHTML = '';
+
+            if (candidates.length === 0) {
+                grid.innerHTML = '<p class="no-candidates">No other candidates available</p>';
+                return;
+            }
+
+            candidates.forEach((c, i) => {
+                const div = document.createElement('div');
+                div.className = 'candidate-card';
+                div.innerHTML = `
+                    <img src="${c.reference_image_url}" alt="${c.card_name}" onerror="this.style.display='none'">
+                    <div class="card-name" title="${c.card_name}">${c.card_name}</div>
+                    <div class="card-meta">${c.set_code} #${c.collector_number}</div>
+                    <div class="confidence">${(c.confidence * 100).toFixed(0)}%</div>
+                    <kbd>${i + 1}</kbd>
+                `;
+                div.onclick = () => selectCandidate(c.card_id);
+                grid.appendChild(div);
+            });
+        }
+
+        function handleReviewKeyboard(e) {
+            if (!isReviewMode) return;
+
+            // Don't handle if modal is open
+            if (document.getElementById('correctionModal').style.display === 'flex') return;
+
+            switch(e.key) {
+                case 'ArrowLeft':
+                    prevCard();
+                    e.preventDefault();
+                    break;
+                case 'ArrowRight':
+                    nextCard();
+                    e.preventDefault();
+                    break;
+                case 'Enter':
+                    confirmMatch();
+                    e.preventDefault();
+                    break;
+                case 'Escape':
+                    exitReviewMode();
+                    e.preventDefault();
+                    break;
+                case '1': case '2': case '3': case '4': case '5':
+                    const idx = parseInt(e.key) - 1;
+                    const candidates = filteredResults[currentReviewIndex]?.candidates || [];
+                    if (candidates[idx]) {
+                        selectCandidate(candidates[idx].card_id);
+                    }
+                    break;
+            }
+        }
+
+        function prevCard() {
+            if (currentReviewIndex > 0) {
+                currentReviewIndex--;
+                renderCurrentReviewCard();
+            }
+        }
+
+        function nextCard() {
+            if (currentReviewIndex < filteredResults.length - 1) {
+                currentReviewIndex++;
+                renderCurrentReviewCard();
+            }
+        }
+
+        async function acceptAndNext() {
+            const result = filteredResults[currentReviewIndex];
+            if (!result) return;
+
+            // Visual feedback
+            const btn = document.getElementById('acceptBtn');
+            btn.textContent = 'Accepted ✓';
+            btn.disabled = true;
+
+            // Move to next after brief delay for feedback
+            setTimeout(() => {
+                btn.textContent = '✓ Accept & Next';
+                btn.disabled = false;
+                nextCard();
+            }, 300);
+        }
+
+        // Keep confirmMatch as alias for keyboard shortcut
+        async function confirmMatch() {
+            acceptAndNext();
+        }
+
+        async function selectCandidate(cardId) {
+            const result = filteredResults[currentReviewIndex];
+            if (!result) return;
+
+            // Save current position before reload
+            const savedIndex = currentReviewIndex;
+            const currentImageId = result.image_id;
+
+            // Show loading state
+            const reviewCard = document.querySelector('.review-card');
+            reviewCard?.classList.add('loading');
+
+            try {
+                const response = await fetch(`/api/batch/${batchId}/correct`, {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({
+                        image_id: result.image_id,
+                        correct_card_id: cardId,
+                        reason: 'Selected from review mode'
+                    })
+                });
+
+                if (!response.ok) throw new Error('Correction failed');
+
+                // Reload results and update view
+                await loadResults();
+                applyFilter();
+
+                // Restore position - find by image_id since indices may shift
+                const newIndex = filteredResults.findIndex(r => r.image_id === currentImageId);
+                currentReviewIndex = newIndex >= 0 ? newIndex : Math.min(savedIndex, filteredResults.length - 1);
+
+                renderCurrentReviewCard();
+
+            } catch (error) {
+                console.error('Correction error:', error);
+                alert('Failed to save correction');
+            } finally {
+                reviewCard?.classList.remove('loading');
+            }
+        }
+
+        // ============================================
+        // INLINE SEARCH IN REVIEW MODE
+        // ============================================
+        let inlineSearchTimeout;
+        let inlineSearchState = { query: '', offset: 0, hasMore: false };
+
+        document.getElementById('inlineSearchInput')?.addEventListener('input', (e) => {
+            clearTimeout(inlineSearchTimeout);
+            const query = e.target.value.trim();
+
+            if (query.length < 2) {
+                document.getElementById('inlineSearchResults').style.display = 'none';
+                document.getElementById('candidateGrid').style.display = 'flex';
+                document.getElementById('loadMoreInline').style.display = 'none';
+                return;
+            }
+
+            inlineSearchTimeout = setTimeout(() => {
+                inlineSearchState = { query, offset: 0, hasMore: false };
+                searchCardsInline(query, false);
+            }, 300);
+        });
+
+        // Set filter change triggers new search
+        document.getElementById('inlineSetFilter')?.addEventListener('change', () => {
+            const query = document.getElementById('inlineSearchInput').value.trim();
+            if (query.length >= 2) {
+                inlineSearchState = { query, offset: 0, hasMore: false };
+                searchCardsInline(query, false);
+            }
+        });
+
+        // Load more button
+        document.getElementById('loadMoreInline')?.addEventListener('click', () => {
+            searchCardsInline(inlineSearchState.query, true);
+        });
+
+        // Prevent arrow keys from navigating when typing in search
+        document.getElementById('inlineSearchInput')?.addEventListener('keydown', (e) => {
+            if (['ArrowLeft', 'ArrowRight', 'Enter', 'Escape'].includes(e.key)) {
+                e.stopPropagation();
+            }
+            if (e.key === 'Escape') {
+                e.target.value = '';
+                document.getElementById('inlineSearchResults').style.display = 'none';
+                document.getElementById('candidateGrid').style.display = 'flex';
+                document.getElementById('loadMoreInline').style.display = 'none';
+                e.target.blur();
+            }
+        });
+
+        async function searchCardsInline(query, append = false) {
+            const setFilter = document.getElementById('inlineSetFilter').value;
+            const limit = 30;
+            const offset = append ? inlineSearchState.offset : 0;
+
+            let url = `/api/batch/search?query=${encodeURIComponent(query)}&limit=${limit}&offset=${offset}`;
+            if (setFilter) {
+                url += `&set_code=${encodeURIComponent(setFilter)}`;
+            }
+
+            try {
+                const response = await fetch(url);
+                const cards = await response.json();
+
+                const resultsDiv = document.getElementById('inlineSearchResults');
+                const candidateGrid = document.getElementById('candidateGrid');
+                const loadMoreBtn = document.getElementById('loadMoreInline');
+
+                candidateGrid.style.display = 'none';
+                resultsDiv.style.display = 'flex';
+
+                if (!append) {
+                    resultsDiv.innerHTML = '';
+                }
+
+                if (cards.length === 0 && !append) {
+                    resultsDiv.innerHTML = '<p class="no-candidates">No cards found</p>';
+                    loadMoreBtn.style.display = 'none';
+                    return;
+                }
+
+                cards.forEach((card) => {
+                    const div = document.createElement('div');
+                    div.className = 'candidate-card search-result';
+                    div.innerHTML = `
+                        <img src="${card.reference_image_url || ''}" alt="${card.card_name}" onerror="this.style.display='none'">
+                        <div class="card-name" title="${card.card_name}">${card.card_name}</div>
+                        <div class="card-meta">${card.set_code} #${card.collector_number}</div>
+                    `;
+                    div.onclick = () => {
+                        selectCandidateFromSearch(card.card_id);
+                    };
+                    resultsDiv.appendChild(div);
+                });
+
+                // Update pagination state
+                inlineSearchState.offset = offset + cards.length;
+                inlineSearchState.hasMore = cards.length === limit;
+                loadMoreBtn.style.display = inlineSearchState.hasMore ? 'block' : 'none';
+
+            } catch (error) {
+                console.error('Inline search error:', error);
+            }
+        }
+
+        async function selectCandidateFromSearch(cardId) {
+            // Clear search UI first
+            document.getElementById('inlineSearchInput').value = '';
+            document.getElementById('inlineSearchResults').style.display = 'none';
+            document.getElementById('candidateGrid').style.display = 'flex';
+
+            // Then select the candidate
+            await selectCandidate(cardId);
+        }
+
+        // ============================================
+        // IMAGE LIGHTBOX / ZOOM
+        // ============================================
+        function openLightbox(imgSrc) {
+            // Create lightbox overlay
+            const lightbox = document.createElement('div');
+            lightbox.className = 'image-lightbox';
+            lightbox.innerHTML = `
+                <span class="lightbox-close">&times;</span>
+                <img src="${imgSrc}" alt="Enlarged card image">
+            `;
+
+            // Close on click anywhere
+            lightbox.onclick = closeLightbox;
+
+            // Close on Escape key
+            document.addEventListener('keydown', lightboxKeyHandler);
+
+            document.body.appendChild(lightbox);
+            document.body.style.overflow = 'hidden';
+        }
+
+        function closeLightbox() {
+            const lightbox = document.querySelector('.image-lightbox');
+            if (lightbox) {
+                lightbox.remove();
+                document.body.style.overflow = '';
+                document.removeEventListener('keydown', lightboxKeyHandler);
+            }
+        }
+
+        function lightboxKeyHandler(e) {
+            if (e.key === 'Escape') {
+                closeLightbox();
+            }
+        }
+
+        // Attach click handlers to review images
+        document.getElementById('reviewScannedImg')?.addEventListener('click', (e) => {
+            e.stopPropagation();
+            openLightbox(e.target.src);
+        });
+
+        document.getElementById('reviewReferenceImg')?.addEventListener('click', (e) => {
+            e.stopPropagation();
+            openLightbox(e.target.src);
+        });
+
+        // Delegate click for candidate images (dynamically created)
+        document.getElementById('candidateGrid')?.addEventListener('click', (e) => {
+            if (e.target.tagName === 'IMG') {
+                e.stopPropagation();
+                openLightbox(e.target.src);
+            }
+        });
+
+        document.getElementById('inlineSearchResults')?.addEventListener('click', (e) => {
+            if (e.target.tagName === 'IMG') {
+                e.stopPropagation();
+                openLightbox(e.target.src);
+            }
+        });
+    </script>
+</body>
+</html>
