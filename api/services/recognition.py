@@ -15,6 +15,7 @@ sys.path.insert(0, str(project_root))
 
 from src.recognition.matcher import CardMatcher
 from src.config import INDEXES_DIR
+from src.utils.device import resolve_device
 
 # Cache matchers by set_code to avoid reloading indices
 _matcher_cache = {}
@@ -45,15 +46,16 @@ def get_available_indexes(finish: str = 'nonfoil') -> List[str]:
     return sorted(set_codes)
 
 
-def get_matcher(set_code: str, finish: str = 'nonfoil', device: str = 'cpu') -> CardMatcher:
+def get_matcher(set_code: str, finish: str = 'nonfoil', device: Optional[str] = None) -> CardMatcher:
     """Get or create a cached CardMatcher instance"""
-    cache_key = f"{set_code.upper()}_{finish}_{device}"
+    resolved_device = resolve_device(device)
+    cache_key = f"{set_code.upper()}_{finish}_{resolved_device}"
 
     if cache_key not in _matcher_cache:
         _matcher_cache[cache_key] = CardMatcher(
             set_code=set_code,
             finish=finish,
-            device=device
+            device=resolved_device
         )
 
     return _matcher_cache[cache_key]
@@ -64,7 +66,7 @@ def recognize_card(
     set_code: str = None,
     finish: str = None,
     prefer_foil: bool = False,
-    device: str = 'cpu'
+    device: Optional[str] = None
 ) -> dict:
     """
     Recognize a single card using CardMatcher
@@ -78,7 +80,7 @@ def recognize_card(
                   If None, searches all available indexes.
         finish: Finish filter ('nonfoil' or 'foil')
         prefer_foil: If True, prefer foil matches; if False, prefer nonfoil
-        device: 'cpu' or 'cuda'
+        device: Device to use ('cpu', 'cuda', or None for auto-detection)
 
     Returns:
         dict with recognition result including boundary_corners

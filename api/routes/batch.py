@@ -53,8 +53,8 @@ def process_batch_background(batch_id: str, image_paths: List[Path], set_code: O
         # Process each image
         for idx, image_path in enumerate(image_paths):
             try:
-                # Run recognition with foil preference
-                result = recognize_card(image_path, set_code=set_code, finish=finish, prefer_foil=prefer_foil, device='cpu')
+                # Run recognition with foil preference (device auto-detected)
+                result = recognize_card(image_path, set_code=set_code, finish=finish, prefer_foil=prefer_foil)
 
                 if 'error' not in result:
                     # Serialize candidates to JSON for storage

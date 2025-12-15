@@ -16,8 +16,17 @@ Card Detection (OpenCV) → CLIP Embedding → FAISS Search → pHash Rerank →
 
 ```bash
 pip install uv
-uv pip install -r requirements.txt
 ```
+
+**Choose your installation:**
+
+| CPU Only | GPU (CUDA) |
+|----------|------------|
+| `uv pip install -r requirements.txt` | `uv pip install -r requirements-gpu.txt --index-strategy unsafe-best-match` |
+
+> For other CUDA versions, edit `requirements-gpu.txt` and change `cu118` to `cu121` or `cu124`.
+
+Device is auto-detected at runtime. Use `--device cpu` or `--device cuda` to override.
 
 ### 2. Initialize Database
 

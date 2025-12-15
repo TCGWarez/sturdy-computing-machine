@@ -42,14 +42,10 @@ class CLIPEmbedder(BaseEmbedder):
             device: Device to run on ('cpu', 'cuda', or None for auto)
             checkpoint_path: Optional path to fine-tuned checkpoint
         """
-        # Auto-detect device if not specified
-        if device is None:
-            device = 'cuda' if torch.cuda.is_available() else 'cpu'
-
-        # Initialize base class
+        # Initialize base class (handles device auto-detection)
         super().__init__(device=device)
 
-        logger.info(f"Initializing CLIP embedder on {device}")
+        logger.info(f"Initializing CLIP embedder on {self.device}")
 
         # Load model and preprocessing
         if checkpoint_path and checkpoint_path.exists():

@@ -11,6 +11,8 @@ from pathlib import Path
 import numpy as np
 from PIL import Image
 
+from src.utils.device import resolve_device
+
 
 class BaseEmbedder(ABC):
     """
@@ -22,14 +24,14 @@ class BaseEmbedder(ABC):
     - Composite embeddings with weighted region combination
     """
 
-    def __init__(self, device: str = 'cpu'):
+    def __init__(self, device: Optional[str] = None):
         """
         Initialize embedder
 
         Args:
-            device: Device to run model on ('cpu' or 'cuda')
+            device: Device to run model on ('cpu' or 'cuda'). Auto-detects if None.
         """
-        self.device = device
+        self.device = resolve_device(device)
         self.embedding_dim = None  # Set by subclass (e.g., 512 for CLIP)
 
     @abstractmethod

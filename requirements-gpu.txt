@@ -1,0 +1,44 @@
+# GPU installation - includes CUDA-enabled PyTorch
+# Usage: uv pip install -r requirements-gpu.txt --index-strategy unsafe-best-match
+# For other CUDA versions, change cu118 to cu121 or cu124
+
+--extra-index-url https://download.pytorch.org/whl/cu118
+
+# Core
+torch>=2.0.0
+open-clip-torch>=2.20.0
+Pillow>=10.0.0
+tqdm>=4.66.0
+opencv-python-headless>=4.8.0
+imagehash>=4.3.1
+numpy>=1.24.0
+
+# Vector search
+faiss-cpu>=1.7.4
+hnswlib>=0.7.0
+
+# Web API
+fastapi>=0.104.0
+uvicorn[standard]>=0.24.0
+python-multipart>=0.0.6
+jinja2>=3.1.2
+
+# Data fetching
+aiohttp>=3.8.0
+aiofiles>=23.0.0
+requests>=2.31.0
+ijson>=3.2.0
+
+# Database
+sqlalchemy>=2.0.0
+
+# CLI
+click>=8.1.7
+
+# Configuration
+python-dotenv>=1.0.0
+
+# Testing
+pytest>=7.4.0
+pytest-cov>=4.1.0
+pytest-asyncio>=0.21.0

@@ -31,7 +31,7 @@ def cli():
 @cli.command()
 @click.option('--set', 'set_code', required=True, help='Set code (e.g., M21, NEO)')
 @click.option('--finish', type=click.Choice(['foil', 'nonfoil']), default='nonfoil', help='Finish type (default: nonfoil)')
-@click.option('--device', default='cpu', type=click.Choice(['cpu', 'cuda']), help='Device to use (default: cpu)')
+@click.option('--device', default=None, type=click.Choice(['cpu', 'cuda']), help='Device to use (auto-detects GPU if available)')
 @click.option('--batch-size', type=int, default=32, help='Batch size for embedding extraction (default: 32)')
 @click.option('--force', is_flag=True, help='Force rebuild even if index exists')
 @click.option('--checkpoint', type=click.Path(exists=True), help='Path to fine-tuned CLIP checkpoint')
@@ -146,7 +146,7 @@ def index(set_code, finish, device, batch_size, force, checkpoint):
 @click.option('--set', 'set_code', required=True, help='Set code (e.g., TLA, DMR)')
 @click.option('--finish', type=click.Choice(['foil', 'nonfoil']), default='nonfoil', help='Finish type')
 @click.option('--debug', is_flag=True, help='Enable debug mode')
-@click.option('--device', default='cpu', type=click.Choice(['cpu', 'cuda']), help='Device to use')
+@click.option('--device', default=None, type=click.Choice(['cpu', 'cuda']), help='Device to use (auto-detects GPU if available)')
 def recognize(scan_dir, output_csv, set_code, finish, debug, device):
     """Recognize scanned card images from a directory."""
     from src.config import BASE_DIR
@@ -334,7 +334,7 @@ def export(job_id, export_format, output_path):
 @click.option('--lr', type=float, default=1e-4, help='Learning rate (default: 1e-4)')
 @click.option('--epochs', type=int, default=5, help='Number of epochs (default: 5)')
 @click.option('--projection-dim', type=int, default=256, help='Projection head dimension (default: 256)')
-@click.option('--device', default='cpu', type=click.Choice(['cpu', 'cuda']), help='Device to use (default: cpu)')
+@click.option('--device', default=None, type=click.Choice(['cpu', 'cuda']), help='Device to use (auto-detects GPU if available)')
 def retrain(data_csv, checkpoint, batch_size, lr, epochs, projection_dim, device):
     """
     Kickoff fine-tune training
