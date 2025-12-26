@@ -25,40 +25,30 @@ MANAPOOL_LANGUAGE_OUTPUT = "ENGLISH"
 MANAPOOL_CONDITION_OUTPUT = "NM"
 
 def _map_finish_for_manapool(raw_finish: str) -> str:
-    """
-    Map internal finish to Manapool finish code (NF/FO/EF).
-    Uses simple heuristics - no hardcoded mapping table needed.
-    """
+    """Map internal finish to Manapool code with proper non-foil handling."""
     key = (raw_finish or "").lower().strip()
-
-    if "etched" in key:
+    norm = key.replace("-", "").replace("_", "").replace(" ", "")
+    # Non-foil must win before any generic "foil" substring
+    if norm.startswith("nonfoil") or "nonfoil" in norm or norm == "nf":
+        return "NF"
+    if "etched" in norm:
         return "EF"
-    if "foil" in key or "surge" in key:
+    if "foil" in norm or "surge" in norm:
         return "FO"
     return "NF"
 
-
 def _match_sku_for_finish(skus: List[Dict], local_finish: str) -> Optional[Dict]:
-    """
-    Match the correct SKU from MTGSold results based on local card finish.
-
-    MTGSold returns all SKUs for a scryfall_id. We match by finish category:
-    - 'etched' -> SKU where finish contains 'ETCHED'
-    - 'foil' -> SKU where finish ends with 'FOIL' (but not 'NON FOIL')
-    - 'nonfoil' -> SKU where finish contains 'NON FOIL'
-    """
+    """Match SKU by finish; tolerate 'non-foil' variants."""
     local_lower = (local_finish or "").lower().strip()
-
+    norm = local_lower.replace("-", "").replace("_", "").replace(" ", "")
     for sku in skus:
         mtg_finish = (sku.get("finish") or "").upper()
-
-        if "etched" in local_lower and "ETCHED" in mtg_finish:
+        if "etched" in norm and "ETCHED" in mtg_finish:
             return sku
-        elif local_lower == "foil" and mtg_finish.endswith("FOIL") and "NON FOIL" not in mtg_finish:
+        elif norm == "foil" and mtg_finish.endswith("FOIL") and "NON FOIL" not in mtg_finish:
             return sku
-        elif local_lower == "nonfoil" and "NON FOIL" in mtg_finish:
+        elif norm in ("nonfoil", "nf") and "NON FOIL" in mtg_finish:
             return sku
-
     return None
 
 

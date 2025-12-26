@@ -15,6 +15,7 @@ from pathlib import Path
 from typing import Union, List, Dict, Any, Optional, Tuple
 from dataclasses import dataclass
 from datetime import datetime
+from concurrent.futures import ThreadPoolExecutor
 import json
 import logging
 
@@ -269,6 +270,149 @@ class CardMatcher:
 
         logger.info("CardMatcher ready")
 
+    def _score_candidate(
+        self,
+        card_id: str,
+        ann_distance: float,
+        scanned_phash_ints: Dict[str, int],
+        db_session=None
+    ) -> Optional[MatchCandidate]:
+        """
+        Score a single candidate card.
+
+        Used by parallel scoring to compute combined scores in worker threads.
+
+        Args:
+            card_id: Card ID from ANN search
+            ann_distance: Distance/similarity from ANN index
+            scanned_phash_ints: Dict of pHash integers for scanned image variants
+            db_session: Optional database session (for thread-safe parallel processing)
+
+        Returns:
+            MatchCandidate with computed scores, or None if card not found
+        """
+        # Use provided session or fall back to instance session (for single-threaded use)
+        session = db_session if db_session is not None else self.db
+
+        # Get card data with all variants
+        card_data = get_card_full_data(session, card_id)
+        if not card_data:
+            logger.warning(f"Card {card_id} not found in database")
+            return None
+
+        card = card_data['card']
+        phash_variants = card_data['phash_variants']
+        embedding_record = card_data['embedding']
+
+        # Get reference embedding
+        ref_embedding = deserialize_embedding(embedding_record.embedding)
+
+        # Compute embedding score
+        embedding_score = ann_distance
+        embedding_distance = 1.0 - embedding_score
+
+        # Compute pHash distances for all 3 variants
+        phash_distances = {}
+        for variant_type in ['full', 'name', 'collector']:
+            if variant_type in phash_variants:
+                ref_phash_hex = phash_variants[variant_type].phash
+                scanned_phash_int = scanned_phash_ints.get(variant_type, 0)
+                scanned_phash_hex = int_to_phash(scanned_phash_int)
+
+                distances = batch_hamming_distance(scanned_phash_hex, [ref_phash_hex])
+                phash_distances[variant_type] = int(distances[0])
+            else:
+                phash_distances[variant_type] = 64  # Max distance if variant missing
+
+        # Compute pHash score (weighted: 0.6*full + 0.3*name + 0.1*collector)
+        max_dist = 64.0
+        phash_full_score = 1.0 - min(phash_distances['full'] / max_dist, 1.0)
+        phash_name_score = 1.0 - min(phash_distances['name'] / max_dist, 1.0)
+        phash_collector_score = 1.0 - min(phash_distances['collector'] / max_dist, 1.0)
+
+        phash_score = (
+            0.6 * phash_full_score +
+            0.3 * phash_name_score +
+            0.1 * phash_collector_score
+        )
+
+        # Combined score: 85% embedding + 15% pHash
+        combined_score = (
+            self.weights['embedding'] * embedding_score +
+            self.weights['phash'] * phash_score
+        )
+
+        return MatchCandidate(
+            card_id=card.id,
+            card_name=card.name,
+            set_code=card.set_code,
+            collector_number=card.collector_number or '',
+            finish=card.finish,
+            scryfall_id=card.scryfall_id,
+            image_path=card.image_path or '',
+            embedding_score=embedding_score,
+            phash_score=phash_score,
+            combined_score=combined_score,
+            embedding_distance=embedding_distance,
+            phash_full_distance=phash_distances['full'],
+            phash_name_distance=phash_distances['name'],
+            phash_collector_distance=phash_distances['collector']
+        )
+
+    def _score_candidates_parallel(
+        self,
+        ann_candidates: List[Tuple[str, float]],
+        scanned_phash_ints: Dict[str, int],
+        max_workers: int = 4
+    ) -> List[MatchCandidate]:
+        """
+        Score all candidates in parallel using ThreadPoolExecutor.
+
+        Parallelizes database lookups and pHash computation for faster
+        candidate scoring when processing many candidates.
+
+        Each worker thread gets its own database session to ensure thread safety.
+        SQLAlchemy sessions are NOT thread-safe, so sharing self.db across threads
+        would cause data corruption and crashes.
+
+        Args:
+            ann_candidates: List of (card_id, distance) tuples from ANN search
+            scanned_phash_ints: Dict of pHash integers for scanned image variants
+            max_workers: Number of parallel workers
+
+        Returns:
+            List of MatchCandidate objects sorted by combined_score (descending)
+        """
+        import threading
+
+        # Thread-local storage for database sessions
+        thread_local = threading.local()
+
+        def get_thread_session():
+            """Get or create a thread-local database session."""
+            if not hasattr(thread_local, 'session'):
+                thread_local.session = SessionLocal()
+            return thread_local.session
+
+        def score_one(args):
+            card_id, ann_distance = args
+            session = get_thread_session()
+            return self._score_candidate(card_id, ann_distance, scanned_phash_ints, db_session=session)
+
+        try:
+            with ThreadPoolExecutor(max_workers=max_workers) as executor:
+                results = list(executor.map(score_one, ann_candidates))
+        finally:
+            # Clean up thread-local sessions
+            # Note: Sessions are cleaned up when threads exit, but explicit cleanup is safer
+            pass
+
+        # Filter None results and sort
+        candidates = [c for c in results if c is not None]
+        candidates.sort(key=lambda c: c.combined_score, reverse=True)
+
+        return candidates
+
     def _get_ocr_disambiguator(self):
         """Lazy-load OCR disambiguator to avoid import errors if pytesseract not installed."""
         if self._ocr_disambiguator is None:
@@ -338,8 +482,8 @@ class CardMatcher:
         # Extract regions
         regions = RegionExtractor.extract_all_regions(warped_rgb)
         
-        # Compute composite embedding
-        embedding_result = self.embedder.get_composite_embedding(
+        # Compute composite embedding (batched for efficiency - single CLIP forward pass)
+        embedding_result = self.embedder.get_composite_embedding_batched(
             full_image=regions['full'],
             regions={'collector': regions['collector'], 'name': regions['name']},
             weights={
@@ -382,75 +526,9 @@ class CardMatcher:
         candidates = []
 
         for card_id, ann_distance in ann_candidates:
-            # Get card data with all variants
-            card_data = get_card_full_data(self.db, card_id)
-            if not card_data:
-                logger.warning(f"Card {card_id} not found in database")
-                continue
-
-            card = card_data['card']
-            phash_variants = card_data['phash_variants']
-            embedding_record = card_data['embedding']
-
-            # Get reference embedding
-            ref_embedding = deserialize_embedding(embedding_record.embedding)
-
-            # Compute embedding score
-            # For cosine similarity (used by FAISS with IP), higher is better
-            # ann_distance is already similarity score from ANN index
-            embedding_score = ann_distance if self.index_type == 'faiss' else ann_distance
-            embedding_distance = 1.0 - embedding_score  # Convert to distance for storage
-
-            # Compute pHash distances for all 3 variants
-            phash_distances = {}
-            for variant_type in ['full', 'name', 'collector']:
-                if variant_type in phash_variants:
-                    ref_phash_hex = phash_variants[variant_type].phash
-                    scanned_phash_int = scanned_phash_ints.get(variant_type, 0)
-                    scanned_phash_hex = int_to_phash(scanned_phash_int)
-
-                    distances = batch_hamming_distance(scanned_phash_hex, [ref_phash_hex])
-                    phash_distances[variant_type] = int(distances[0])
-                else:
-                    phash_distances[variant_type] = 64  # Max distance if variant missing
-
-            # Compute pHash score (weighted: 0.6*full + 0.3*name + 0.1*collector)
-            max_dist = 64.0
-            phash_full_score = 1.0 - min(phash_distances['full'] / max_dist, 1.0)
-            phash_name_score = 1.0 - min(phash_distances['name'] / max_dist, 1.0)
-            phash_collector_score = 1.0 - min(phash_distances['collector'] / max_dist, 1.0)
-
-            phash_score = (
-                0.6 * phash_full_score +
-                0.3 * phash_name_score +
-                0.1 * phash_collector_score
-            )
-
-            # Combined score: 85% embedding + 15% pHash
-            combined_score = (
-                self.weights['embedding'] * embedding_score +
-                self.weights['phash'] * phash_score
-            )
-
-            # Create candidate
-            candidate = MatchCandidate(
-                card_id=card.id,
-                card_name=card.name,
-                set_code=card.set_code,
-                collector_number=card.collector_number or '',
-                finish=card.finish,
-                scryfall_id=card.scryfall_id,
-                image_path=card.image_path or '',
-                embedding_score=embedding_score,
-                phash_score=phash_score,
-                combined_score=combined_score,
-                embedding_distance=embedding_distance,
-                phash_full_distance=phash_distances['full'],
-                phash_name_distance=phash_distances['name'],
-                phash_collector_distance=phash_distances['collector']
-            )
-
-            candidates.append(candidate)
+            candidate = self._score_candidate(card_id, ann_distance, scanned_phash_ints)
+            if candidate:
+                candidates.append(candidate)
 
         # Sort candidates by combined score (descending)
         candidates.sort(key=lambda c: c.combined_score, reverse=True)

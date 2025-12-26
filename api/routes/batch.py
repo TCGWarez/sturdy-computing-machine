@@ -3,10 +3,11 @@ Batch processing routes
 Handles upload, recognition, corrections, and export
 """
 
-from fastapi import APIRouter, UploadFile, File, Depends, HTTPException, BackgroundTasks
+import asyncio
+from fastapi import APIRouter, UploadFile, File, Depends, HTTPException, Request
 from fastapi.responses import FileResponse, StreamingResponse, RedirectResponse
 from sqlalchemy.orm import Session
-from typing import List, Optional, Tuple
+from typing import List, Optional, Tuple, Set
 import uuid
 import shutil
 import zipfile
@@ -25,9 +26,14 @@ from api.models import (
 from api.services.recognition import recognize_card
 from api.services.manapool_export import build_manapool_csv
 from api.services.mtgsold_config import is_mtgsold_enabled
+from api.services.queue import acquire_batch_slot, get_queue_status, run_with_concurrency_control
+from api.services.rate_limiter import limiter
 from src.database.schema import Card as DBCard
 
 router = APIRouter()
+
+# Keep track of background tasks to prevent garbage collection
+_background_tasks: Set[asyncio.Task] = set()
 
 UPLOAD_DIR = Path("uploads")
 UPLOAD_DIR.mkdir(exist_ok=True)
@@ -94,7 +100,9 @@ def process_batch_background(batch_id: str, image_paths: List[Path], set_code: O
                 batch.processed_cards = idx + 1
                 db.commit()
 
-            except Exception:
+            except Exception as e:
+                logger.error(f"Batch {batch_id}: Failed to process image {image_path.name}: {e}")
+                # Continue processing other images - one failure shouldn't stop the batch
                 continue
 
         # Mark batch as completed
@@ -116,9 +124,50 @@ def process_batch_background(batch_id: str, image_paths: List[Path], set_code: O
     finally:
         db.close()
 
+
+async def process_batch_async(batch_id: str, image_paths: List[Path], set_code: Optional[str], finish: Optional[str], prefer_foil: bool = False):
+    """
+    Async wrapper for batch processing with concurrency control.
+
+    Acquires a semaphore slot before processing to limit concurrent batches,
+    then runs the sync processing in a thread pool executor.
+    """
+    import logging
+    logger = logging.getLogger(__name__)
+
+    try:
+        await run_with_concurrency_control(
+            batch_id,
+            process_batch_background,
+            batch_id, image_paths, set_code, finish, prefer_foil
+        )
+    except Exception as e:
+        logger.error(f"Batch {batch_id}: Async processing failed: {e}")
+
+
+@router.get("/queue/status")
+async def get_queue_status_endpoint():
+    """
+    Get current processing queue status.
+
+    Returns information about active and waiting batches,
+    useful for monitoring system load and capacity.
+    """
+    status = get_queue_status()
+    return {
+        "active_batches": status.active_batches,
+        "waiting_batches": status.waiting_batches,
+        "max_concurrent": status.max_concurrent,
+        "available_slots": status.available_slots,
+        "active_batch_ids": status.active_batch_ids,
+        "waiting_batch_ids": status.waiting_batch_ids
+    }
+
+
 @router.post("/upload", response_model=BatchInfo)
+@limiter.limit("10/minute")  # Rate limit: 10 batch uploads per minute per IP
 async def upload_batch(
-    background_tasks: BackgroundTasks,
+    request: Request,  # Required for rate limiter
     files: List[UploadFile] = File(...),
     set_code: Optional[str] = None,
     finish: Optional[str] = None,
@@ -206,8 +255,14 @@ async def upload_batch(
     db.add(batch)
     db.commit()
 
-    # Start background processing
-    background_tasks.add_task(process_batch_background, batch_id, image_paths, set_code, finish, prefer_foil)
+    # Start background processing with concurrency control
+    # Use asyncio.create_task to run in background while respecting semaphore limits
+    task = asyncio.create_task(
+        process_batch_async(batch_id, image_paths, set_code, finish, prefer_foil)
+    )
+    # Keep reference to prevent garbage collection
+    _background_tasks.add(task)
+    task.add_done_callback(_background_tasks.discard)
 
     return BatchInfo(
         batch_id=batch_id,

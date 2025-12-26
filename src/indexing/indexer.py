@@ -204,8 +204,8 @@ class Indexer:
             regions = RegionExtractor.extract_all_regions(normalized_img)
 
             # Generate composite embedding with pre-weighted regions
-            # This is the KEY change that fixes the FAISS search failure!
-            embedding_result = self.embedder.get_composite_embedding(
+            # Uses batched version for efficiency (single CLIP forward pass for 3 regions)
+            embedding_result = self.embedder.get_composite_embedding_batched(
                 full_image=regions['full'],
                 regions={'collector': regions['collector'], 'name': regions['name']},
                 weights={
