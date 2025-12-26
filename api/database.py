@@ -53,6 +53,11 @@ class BatchResult(Base):
 
     candidates_json = Column(Text, nullable=True)
 
+    # OCR-detected data (for finish auto-detection)
+    detected_finish = Column(String, nullable=True)  # "foil" or "nonfoil" from OCR
+    ocr_set_code = Column(String, nullable=True)     # Set code extracted via OCR
+    ocr_collector_number = Column(String, nullable=True)  # Collector number from OCR
+
     is_corrected = Column(Boolean, nullable=False, default=False)
     corrected_card_id = Column(String, nullable=True)
     correction_reason = Column(Text, nullable=True)

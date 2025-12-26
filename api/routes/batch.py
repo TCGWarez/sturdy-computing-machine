@@ -4,7 +4,7 @@ Handles upload, recognition, corrections, and export
 """
 
 from fastapi import APIRouter, UploadFile, File, Depends, HTTPException, BackgroundTasks
-from fastapi.responses import FileResponse, StreamingResponse
+from fastapi.responses import FileResponse, StreamingResponse, RedirectResponse
 from sqlalchemy.orm import Session
 from typing import List, Optional, Tuple
 import uuid
@@ -20,7 +20,7 @@ from api.database import get_db, Batch, BatchResult
 from api.models import (
     BatchCreate, BatchInfo, BatchResults, CardMatch,
     CorrectionRequest, CorrectionResponse, ExportFormat,
-    CardSearchResult, BatchStatus, CandidateMatch
+    CardSearchResult, BatchStatus, CandidateMatch, FinishToggleRequest
 )
 from api.services.recognition import recognize_card
 from api.services.manapool_export import build_manapool_csv
@@ -41,8 +41,17 @@ def _resolve_display_card(db: Session, batch_result: BatchResult):
 
 def process_batch_background(batch_id: str, image_paths: List[Path], set_code: Optional[str], finish: Optional[str], prefer_foil: bool = False):
     """Background task to process batch recognition"""
+    import logging
     from api.database import SessionLocal
+    from src.utils.device import resolve_device
+
+    logger = logging.getLogger(__name__)
     db = SessionLocal()
+
+    # Log device at batch start
+    device = resolve_device()
+    start_time = datetime.utcnow()
+    logger.info(f"Batch {batch_id}: Starting processing of {len(image_paths)} images on {device.upper()}")
 
     try:
         # Update batch status
@@ -62,7 +71,7 @@ def process_batch_background(batch_id: str, image_paths: List[Path], set_code: O
                     if 'candidates' in result and result['candidates']:
                         candidates_json = json.dumps(result['candidates'])
 
-                    # Create batch result
+                    # Create batch result with OCR data
                     image_id = str(uuid.uuid4())
                     batch_result = BatchResult(
                         batch_id=batch_id,
@@ -73,7 +82,11 @@ def process_batch_background(batch_id: str, image_paths: List[Path], set_code: O
                         confidence=result['combined_score'],
                         clarity_score=result.get('clarity_score', 1.0),
                         is_ambiguous=result.get('is_ambiguous', False),
-                        candidates_json=candidates_json
+                        candidates_json=candidates_json,
+                        # OCR-detected data
+                        detected_finish=result.get('detected_finish'),
+                        ocr_set_code=result.get('ocr_set_code'),
+                        ocr_collector_number=result.get('ocr_collector_number')
                     )
                     db.add(batch_result)
 
@@ -89,7 +102,13 @@ def process_batch_background(batch_id: str, image_paths: List[Path], set_code: O
         batch.completed_at = datetime.utcnow()
         db.commit()
 
-    except Exception:
+        # Log completion with timing
+        elapsed = (batch.completed_at - start_time).total_seconds()
+        per_card = elapsed / len(image_paths) if image_paths else 0
+        logger.info(f"Batch {batch_id}: Completed {len(image_paths)} images in {elapsed:.1f}s ({per_card:.2f}s/card) on {device.upper()}")
+
+    except Exception as e:
+        logger.error(f"Batch {batch_id}: Failed with error: {e}")
         batch = db.query(Batch).filter(Batch.id == batch_id).first()
         batch.status = BatchStatus.FAILED
         db.commit()
@@ -113,12 +132,22 @@ async def upload_batch(
     Args:
         files: Image files or zip archive
         set_code: Set code filter (e.g., 'TLA', 'DMR'). If not provided, searches all indexed sets.
-        finish: 'nonfoil' or 'foil' to filter search space
-        prefer_foil: If true, prefer foil matches when ambiguous
+        finish: Finish filter - 'nonfoil' or 'foil'. Defaults to 'nonfoil' if not provided.
+        prefer_foil: If True, searches foil index first, falls back to nonfoil if no good match.
+                     Useful for batches with mixed or unknown finishes.
+
+    Returns:
+        BatchInfo with batch_id for status polling
 
     Note:
         When no set_code is provided, the system searches ALL indexed sets which is slower.
         Batch size is limited to 50 images in this case.
+
+        Finish options:
+        - finish=None: Defaults to nonfoil (safest)
+        - finish='foil': Search foil index only
+        - finish='nonfoil': Search nonfoil index only
+        - prefer_foil=True: Search foil first, fallback to nonfoil
     """
     # Create batch record
     batch_id = str(uuid.uuid4())
@@ -272,6 +301,10 @@ async def get_batch_results(batch_id: str, db: Session = Depends(get_db)):
             collector_number=display_card.collector_number,
             finish=display_card.finish,
             confidence=min(1.0, br.confidence),  # Clamp to 1.0 max
+            # OCR-detected data
+            detected_finish=getattr(br, 'detected_finish', None),
+            ocr_set_code=getattr(br, 'ocr_set_code', None),
+            ocr_collector_number=getattr(br, 'ocr_collector_number', None),
             reference_image_url=reference_image_url,
             clarity_score=getattr(br, 'clarity_score', 1.0) or 1.0,
             is_ambiguous=getattr(br, 'is_ambiguous', False) or False,
@@ -344,6 +377,117 @@ async def correct_match(
             variant_count=0
         )
     )
+
+
+@router.post("/{batch_id}/toggle-finish", response_model=CorrectionResponse)
+async def toggle_finish(
+    batch_id: str,
+    request: FinishToggleRequest,
+    db: Session = Depends(get_db)
+):
+    """
+    Toggle finish (foil/nonfoil) for a card and re-match to appropriate variant.
+
+    Finds the same card with the opposite finish and updates the match.
+    Returns error if no variant with requested finish exists.
+    """
+    # Validate new_finish
+    if request.new_finish not in ('foil', 'nonfoil'):
+        raise HTTPException(status_code=400, detail="new_finish must be 'foil' or 'nonfoil'")
+
+    # Find batch result
+    batch_result = db.query(BatchResult).filter(
+        BatchResult.batch_id == batch_id,
+        BatchResult.image_id == request.image_id
+    ).first()
+
+    if not batch_result:
+        raise HTTPException(status_code=404, detail="Image not found in batch")
+
+    # Get current display card (respecting corrections)
+    current_card = _resolve_display_card(db, batch_result)
+
+    if not current_card:
+        raise HTTPException(status_code=404, detail="Current card not found")
+
+    # Already the requested finish?
+    if current_card.finish == request.new_finish:
+        # No change needed, return current state
+        return CorrectionResponse(
+            success=True,
+            image_id=request.image_id,
+            updated_match=CardMatch(
+                image_id=batch_result.image_id,
+                image_filename=batch_result.image_filename,
+                image_url=f"/api/batch/{batch_id}/image/{batch_result.image_id}",
+                card_id=current_card.id,
+                card_name=current_card.name,
+                set_code=current_card.set_code,
+                collector_number=current_card.collector_number,
+                finish=current_card.finish,
+                confidence=min(1.0, batch_result.confidence),
+                detected_finish=getattr(batch_result, 'detected_finish', None),
+                is_corrected=batch_result.is_corrected,
+                corrected_card_id=batch_result.corrected_card_id,
+                has_variants=True,
+                variant_count=2
+            )
+        )
+
+    # Find card with same name, set, collector number but different finish
+    alternate_card = db.query(DBCard).filter(
+        DBCard.name == current_card.name,
+        DBCard.set_code == current_card.set_code,
+        DBCard.collector_number == current_card.collector_number,
+        DBCard.finish == request.new_finish
+    ).first()
+
+    if not alternate_card:
+        raise HTTPException(
+            status_code=404,
+            detail=f"No {request.new_finish} variant exists for this card"
+        )
+
+    # Update as correction to the alternate card
+    batch_result.is_corrected = True
+    batch_result.corrected_card_id = alternate_card.id
+    batch_result.correction_reason = f"Finish toggled to {request.new_finish}"
+    batch_result.corrected_at = datetime.utcnow()
+
+    # Also update detected_finish to match user's selection
+    batch_result.detected_finish = request.new_finish
+
+    db.commit()
+
+    # Count variants for this card
+    variant_count = db.query(DBCard).filter(
+        DBCard.name == alternate_card.name,
+        DBCard.set_code == alternate_card.set_code
+    ).count()
+
+    return CorrectionResponse(
+        success=True,
+        image_id=request.image_id,
+        updated_match=CardMatch(
+            image_id=batch_result.image_id,
+            image_filename=batch_result.image_filename,
+            image_url=f"/api/batch/{batch_id}/image/{batch_result.image_id}",
+            card_id=alternate_card.id,
+            card_name=alternate_card.name,
+            set_code=alternate_card.set_code,
+            collector_number=alternate_card.collector_number,
+            finish=alternate_card.finish,
+            confidence=min(1.0, batch_result.confidence),
+            detected_finish=request.new_finish,
+            reference_image_url=f"/api/batch/reference/{alternate_card.id}",
+            is_corrected=True,
+            corrected_card_id=alternate_card.id,
+            correction_reason=f"Finish toggled to {request.new_finish}",
+            has_variants=(variant_count > 1),
+            variant_count=variant_count
+        )
+    )
+
 
 @router.get("/{batch_id}/export")
 async def export_batch(
@@ -453,21 +597,30 @@ async def get_image(batch_id: str, image_id: str, db: Session = Depends(get_db))
 
 @router.get("/reference/{card_id}")
 async def get_reference_image(card_id: str, db: Session = Depends(get_db)):
-    """Serve reference image for a card from Scryfall images"""
+    """
+    Serve reference image for a card.
+
+    Tries local Scryfall images first, falls back to Scryfall CDN if not present.
+    This allows the system to work without local images (just DB + indexes).
+    """
     card = db.query(DBCard).filter(DBCard.id == card_id).first()
 
     if not card:
         raise HTTPException(status_code=404, detail="Card not found")
 
-    if not card.image_path:
-        raise HTTPException(status_code=404, detail="Card has no image path")
+    # Try local file first
+    if card.image_path:
+        image_path = Path(card.image_path)
+        if image_path.exists():
+            return FileResponse(image_path)
 
-    image_path = Path(card.image_path)
+    # Fall back to Scryfall CDN
+    if card.scryfall_id:
+        sid = card.scryfall_id
+        cdn_url = f"https://cards.scryfall.io/normal/front/{sid[0]}/{sid[1]}/{sid}.jpg"
+        return RedirectResponse(url=cdn_url, status_code=302)
 
-    if not image_path.exists():
-        raise HTTPException(status_code=404, detail="Reference image file not found")
-
-    return FileResponse(image_path)
+    raise HTTPException(status_code=404, detail="No image available (no local file or scryfall_id)")
 
 @router.get("/search", response_model=List[CardSearchResult])
 async def search_cards(
@@ -492,7 +645,7 @@ async def search_cards(
             set_code=card.set_code,
             collector_number=card.collector_number,
             finish=card.finish,
-            scryfall_image_url=None
+            scryfall_image_url=f"/api/batch/reference/{card.id}"
         )
         for card in cards
     ]

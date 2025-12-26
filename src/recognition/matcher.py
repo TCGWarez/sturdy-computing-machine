@@ -39,6 +39,7 @@ from src.recognition.orb_utils import compute_orb_similarity
 from src.database.schema import SessionLocal, Card, PhashVariant, CompositeEmbedding
 from src.database.db import get_card_full_data
 from src.indexing.indexer import deserialize_embedding
+from src.config import OCR_BOOST_WEIGHT
 
 logger = logging.getLogger(__name__)
 
@@ -105,6 +106,15 @@ class MatchResult:
     # Format: [[x1,y1], [x2,y2], [x3,y3], [x4,y4]] - top-left, top-right, bottom-right, bottom-left
     boundary_corners: Optional[List[List[float]]] = None
 
+    # OCR disambiguation info (for card name/set/collector matching, NOT finish detection)
+    ocr_used: bool = False
+    ocr_title: Optional[str] = None
+    ocr_collector: Optional[str] = None
+    ocr_set_code: Optional[str] = None
+    ocr_collector_number: Optional[str] = None
+    ocr_title_confidence: Optional[float] = None
+    ocr_collector_confidence: Optional[float] = None
+
     # Debug info
     debug_info: Optional[Dict[str, Any]] = None
 
@@ -120,6 +130,13 @@ class MatchResult:
             'candidates': [c.to_dict() for c in self.candidates],
             'processing_time': float(self.processing_time),
             'boundary_corners': self.boundary_corners,
+            'ocr_used': self.ocr_used,
+            'ocr_title': self.ocr_title,
+            'ocr_collector': self.ocr_collector,
+            'ocr_set_code': self.ocr_set_code,
+            'ocr_collector_number': self.ocr_collector_number,
+            'ocr_title_confidence': self.ocr_title_confidence,
+            'ocr_collector_confidence': self.ocr_collector_confidence,
             'debug_info': self.debug_info
         }
 
@@ -247,7 +264,26 @@ class CardMatcher:
         # Initialize database connection
         self.db = SessionLocal()
 
+        # Initialize OCR disambiguator (lazy load to avoid import errors if pytesseract not installed)
+        self._ocr_disambiguator = None
+
         logger.info("CardMatcher ready")
+
+    def _get_ocr_disambiguator(self):
+        """Lazy-load OCR disambiguator to avoid import errors if pytesseract not installed."""
+        if self._ocr_disambiguator is None:
+            try:
+                from src.ocr.tesseract_service import TesseractOCRService
+                from src.ocr.disambiguator import OCRDisambiguator
+                ocr_service = TesseractOCRService()
+                if ocr_service.is_available():
+                    self._ocr_disambiguator = OCRDisambiguator(ocr_service, self.db)
+                    logger.info("OCR disambiguator initialized")
+                else:
+                    logger.warning("Tesseract not available, OCR disambiguation disabled")
+            except ImportError as e:
+                logger.warning(f"OCR modules not available: {e}")
+        return self._ocr_disambiguator
 
     def match_scanned(
         self,
@@ -477,16 +513,75 @@ class CardMatcher:
             candidates.sort(key=lambda c: c.combined_score, reverse=True)
             logger.info(f"New top candidate after ORB: {candidates[0].card_name}")
 
+        # Step 5c: Compute initial clarity to decide if OCR is needed
+        clarity_score, is_ambiguous = compute_clarity(candidates)
+        initial_confidence = candidates[0].combined_score
+
+        # Step 5d: OCR Disambiguation (only if ambiguous or low confidence)
+        ocr_result = None
+        triangulated_match = None  # Direct match from triangulation (not in candidates)
+        if is_ambiguous or initial_confidence < self.accept_threshold:
+            logger.info("Step 5d: Running OCR disambiguation...")
+            ocr_disambiguator = self._get_ocr_disambiguator()
+            if ocr_disambiguator:
+                try:
+                    ocr_result = ocr_disambiguator.disambiguate(
+                        warped_rgb,
+                        candidates,
+                        boost_weight=OCR_BOOST_WEIGHT
+                    )
+                    if ocr_result.success:
+                        # Check if triangulation found a card not in candidates
+                        if ocr_result.method == 'triangulation' and ocr_result.card_id:
+                            # Check if this card is in our candidates
+                            card_in_candidates = any(c.card_id == ocr_result.card_id for c in candidates)
+                            if not card_in_candidates:
+                                # Triangulation found a card NOT in candidates - use it directly
+                                logger.info(f"Triangulation found card not in candidates: {ocr_result.card_id}")
+                                triangulated_card = self.db.query(Card).filter(Card.id == ocr_result.card_id).first()
+                                if triangulated_card:
+                                    # Create a high-confidence candidate for the triangulated card
+                                    triangulated_match = MatchCandidate(
+                                        card_id=triangulated_card.id,
+                                        card_name=triangulated_card.name,
+                                        set_code=triangulated_card.set_code,
+                                        collector_number=triangulated_card.collector_number or '',
+                                        finish=triangulated_card.finish,
+                                        scryfall_id=triangulated_card.scryfall_id,
+                                        image_path=triangulated_card.image_path or '',
+                                        embedding_score=0.95,  # High confidence from OCR
+                                        phash_score=0.95,
+                                        combined_score=0.95,  # Triangulation is high confidence
+                                        embedding_distance=0.05,
+                                        phash_full_distance=0,
+                                        phash_name_distance=0,
+                                        phash_collector_distance=0
+                                    )
+                                    # Insert as top candidate
+                                    candidates.insert(0, triangulated_match)
+                                    logger.info(f"Inserted triangulated card as top candidate: {triangulated_card.name} ({triangulated_card.set_code} #{triangulated_card.collector_number})")
+
+                        # Re-sort candidates after OCR boost
+                        candidates.sort(key=lambda c: c.combined_score, reverse=True)
+                        logger.info(f"New top candidate after OCR: {candidates[0].card_name}")
+                        # Recompute clarity after OCR
+                        clarity_score, is_ambiguous = compute_clarity(candidates)
+                except Exception as e:
+                    logger.warning(f"OCR disambiguation failed: {e}")
+            else:
+                logger.debug("OCR disambiguator not available, skipping")
+
         # Step 6: Determine match confidence and clarity
         top_candidate = candidates[0]
         match_card_id = top_candidate.card_id
         confidence = top_candidate.combined_score
 
-        # Compute clarity score (search-based matching)
-        clarity_score, is_ambiguous = compute_clarity(candidates)
-
         # Determine match method based on confidence AND clarity
-        if confidence >= self.accept_threshold:
+        # Triangulation is highest priority - it's an exact database match
+        if triangulated_match is not None and top_candidate.card_id == triangulated_match.card_id:
+            match_method = 'ocr_triangulation'
+            logger.info(f"🎯 OCR Triangulation match: {top_candidate.card_name} ({top_candidate.set_code} #{top_candidate.collector_number})")
+        elif confidence >= self.accept_threshold:
             if is_ambiguous:
                 # High confidence but multiple similar candidates
                 match_method = 'ambiguous_high'
@@ -504,6 +599,15 @@ class CardMatcher:
         # Create result
         processing_time = (datetime.now() - start_time).total_seconds()
 
+        # Build OCR info for result (disambiguation only, not finish detection)
+        ocr_used = ocr_result is not None and ocr_result.success
+        ocr_title = ocr_result.title_text if ocr_result else None
+        ocr_collector = ocr_result.collector_info.raw_text if ocr_result and ocr_result.collector_info else None
+        ocr_set_code = ocr_result.collector_info.set_code if ocr_result and ocr_result.collector_info else None
+        ocr_collector_number = ocr_result.collector_info.collector_number if ocr_result and ocr_result.collector_info else None
+        ocr_title_confidence = ocr_result.title_confidence if ocr_result else None
+        ocr_collector_confidence = ocr_result.collector_confidence if ocr_result else None
+
         result = MatchResult(
             scanned_path=str(image_path),
             match_card_id=match_card_id,
@@ -513,7 +617,14 @@ class CardMatcher:
             processing_time=processing_time,
             clarity_score=clarity_score,
             is_ambiguous=is_ambiguous,
-            boundary_corners=boundary_corners
+            boundary_corners=boundary_corners,
+            ocr_used=ocr_used,
+            ocr_title=ocr_title,
+            ocr_collector=ocr_collector,
+            ocr_set_code=ocr_set_code,
+            ocr_collector_number=ocr_collector_number,
+            ocr_title_confidence=ocr_title_confidence,
+            ocr_collector_confidence=ocr_collector_confidence
         )
 
         logger.info(f"Matching completed in {processing_time:.2f}s")
@@ -625,17 +736,23 @@ def main():
         print(f"Method: {result.match_method}")
         print(f"Processing Time: {result.processing_time:.2f}s")
 
-        if result.ocr_name:
-            print(f"\nOCR Name: {result.ocr_name}")
-        if result.ocr_collector:
-            print(f"OCR Collector: {result.ocr_collector}")
+        if result.ocr_used:
+            print(f"\nOCR Used: Yes")
+            if result.ocr_title:
+                print(f"OCR Title: {result.ocr_title}")
+            if result.ocr_collector:
+                print(f"OCR Collector: {result.ocr_collector}")
+            if result.ocr_set_code:
+                print(f"OCR Set Code: {result.ocr_set_code}")
+            if result.ocr_collector_number:
+                print(f"OCR Collector #: {result.ocr_collector_number}")
 
         print(f"\nTop 5 Candidates:")
         print("-" * 80)
         for i, candidate in enumerate(result.candidates[:5], 1):
             print(f"{i}. {candidate.card_name} ({candidate.set_code} #{candidate.collector_number})")
             print(f"   Score: {candidate.combined_score:.3f} (emb: {candidate.embedding_score:.3f}, "
-                  f"phash: {candidate.phash_score:.3f}, ocr: {candidate.ocr_score:.3f})")
+                  f"phash: {candidate.phash_score:.3f})")
 
         # Save to file if requested
         if args.output:

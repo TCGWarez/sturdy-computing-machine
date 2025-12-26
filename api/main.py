@@ -10,6 +10,13 @@ from fastapi.responses import HTMLResponse, FileResponse
 from fastapi.templating import Jinja2Templates
 from pathlib import Path
 import sys
+import logging
+
+# Configure logging to show INFO level messages
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(levelname)s:     %(name)s - %(message)s'
+)
 
 project_root = Path(__file__).parent.parent
 sys.path.insert(0, str(project_root))

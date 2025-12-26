@@ -41,6 +41,11 @@ class CardMatch(BaseModel):
     finish: str
     confidence: float = Field(..., ge=0.0, le=1.0)
 
+    # OCR-extracted data (for validation and auto-detection)
+    detected_finish: Optional[str] = Field(None, description="OCR-detected finish: 'foil' or 'nonfoil'")
+    ocr_set_code: Optional[str] = Field(None, description="Set code extracted from collector region via OCR")
+    ocr_collector_number: Optional[str] = Field(None, description="Collector number extracted via OCR")
+
     # Reference image URL (Scryfall image for comparison)
     reference_image_url: Optional[str] = None
 
@@ -74,6 +79,12 @@ class CorrectionRequest(BaseModel):
     image_id: str
     correct_card_id: str
     reason: Optional[str] = Field(None, description="Why this correction was made")
+
+
+class FinishToggleRequest(BaseModel):
+    """Request to toggle finish (foil/nonfoil) for a card"""
+    image_id: str
+    new_finish: str = Field(..., description="New finish: 'foil' or 'nonfoil'")
 
 class CorrectionResponse(BaseModel):
     """Response after correction"""

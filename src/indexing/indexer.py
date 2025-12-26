@@ -229,6 +229,8 @@ class Indexer:
                 existing.collector_number = metadata.get('collector_number')
                 existing.finish = self.finish
                 existing.variant_type = self._detect_variant_type(metadata)
+                existing.tcgplayer_id = metadata.get('tcgplayer_id')
+                existing.tcgplayer_etched_id = metadata.get('tcgplayer_etched_id')
 
                 # Update composite embedding
                 if existing.composite_embedding:
@@ -297,7 +299,9 @@ class Indexer:
                     collector_number=metadata.get('collector_number'),
                     finish=self.finish,
                     variant_type=self._detect_variant_type(metadata),
-                    image_path=str(image_path)
+                    image_path=str(image_path),
+                    tcgplayer_id=metadata.get('tcgplayer_id'),
+                    tcgplayer_etched_id=metadata.get('tcgplayer_etched_id')
                 )
                 self.db.add(card)
                 self.db.flush()  # Flush to get card ID

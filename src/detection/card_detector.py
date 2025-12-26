@@ -267,25 +267,29 @@ def _detect_by_contours(gray: np.ndarray) -> Optional[Tuple[np.ndarray, tuple]]:
     if not contours:
         return None
 
-    # Sort contours by area (largest first)
-    contours = sorted(contours, key=cv2.contourArea, reverse=True)
-
     img_area = gray.shape[0] * gray.shape[1]
 
-    # Try to find a rectangular contour with proper aspect ratio
-    for contour in contours[:10]:  # Check top 10 largest contours
-        # Check if area is reasonable (at least 10% of image)
-        area = cv2.contourArea(contour)
-        if area < img_area * 0.1:
-            continue
-
-        # Use minAreaRect for rotation-aware bounding box
+    # Build list of (contour, rect, bounding_area) for proper sorting
+    # NOTE: We use bounding rect area (rect_w * rect_h) instead of cv2.contourArea()
+    # because outline-type contours (like card edges) have small contourArea but large bounding boxes
+    contour_data = []
+    for contour in contours:
         rect = cv2.minAreaRect(contour)
         center, (rect_w, rect_h), angle = rect
+        if rect_w > 0 and rect_h > 0:
+            bounding_area = rect_w * rect_h
+            contour_data.append((contour, rect, bounding_area))
 
-        # Skip if dimensions are invalid
-        if rect_w <= 0 or rect_h <= 0:
+    # Sort by bounding rectangle area (largest first)
+    contour_data.sort(key=lambda x: x[2], reverse=True)
+
+    # Try to find a rectangular contour with proper aspect ratio
+    for contour, rect, bounding_area in contour_data[:10]:  # Check top 10 largest
+        # Check if bounding area is reasonable (at least 10% of image)
+        if bounding_area < img_area * 0.1:
             continue
+
+        center, (rect_w, rect_h), angle = rect
 
         # Normalize so shorter dimension is width (portrait orientation)
         if rect_w > rect_h:
@@ -301,7 +305,8 @@ def _detect_by_contours(gray: np.ndarray) -> Optional[Tuple[np.ndarray, tuple]]:
             corners = _order_corners(corners)
 
             logger.debug(f"Found card with aspect ratio {aspect_ratio:.3f} "
-                        f"(expected {EXPECTED_ASPECT_RATIO:.3f}), angle={angle:.1f}°")
+                        f"(expected {EXPECTED_ASPECT_RATIO:.3f}), angle={angle:.1f}°, "
+                        f"bounding_area={bounding_area/img_area*100:.1f}%")
             return corners, rect
         else:
             logger.debug(f"Rejected contour with aspect ratio {aspect_ratio:.3f} "
