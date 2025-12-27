@@ -27,7 +27,7 @@ from src.config import (
     CLARITY_THRESHOLD
 )
 from src.detection.card_detector import detect_and_warp
-from src.embeddings.embedder import CLIPEmbedder
+from src.embeddings.embedder import get_embedder
 from src.ann.faiss_index import FAISSIndex
 from src.ann.hnsw_index import HNSWIndex
 from src.indexing.phash import (
@@ -232,9 +232,9 @@ class CardMatcher:
         logger.info(f"Scoring weights: {self.weights}")
         logger.info(f"Thresholds - Accept: {self.accept_threshold}, Manual: {self.manual_threshold}")
 
-        # Initialize embedder
+        # Initialize embedder (use global singleton to save memory)
         logger.info("Loading CLIP embedder...")
-        self.embedder = CLIPEmbedder(device=device, checkpoint_path=embedder_checkpoint)
+        self.embedder = get_embedder(device=device, checkpoint_path=embedder_checkpoint)
 
         # Load ANN index
         logger.info(f"Loading {index_type.upper()} index...")
