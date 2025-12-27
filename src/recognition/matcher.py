@@ -15,6 +15,7 @@ from pathlib import Path
 from typing import Union, List, Dict, Any, Optional, Tuple
 from dataclasses import dataclass
 from datetime import datetime
+from concurrent.futures import ThreadPoolExecutor
 import json
 import logging
 
@@ -26,7 +27,7 @@ from src.config import (
     CLARITY_THRESHOLD
 )
 from src.detection.card_detector import detect_and_warp
-from src.embeddings.embedder import CLIPEmbedder
+from src.embeddings.embedder import get_embedder
 from src.ann.faiss_index import FAISSIndex
 from src.ann.hnsw_index import HNSWIndex
 from src.indexing.phash import (
@@ -39,6 +40,7 @@ from src.recognition.orb_utils import compute_orb_similarity
 from src.database.schema import SessionLocal, Card, PhashVariant, CompositeEmbedding
 from src.database.db import get_card_full_data
 from src.indexing.indexer import deserialize_embedding
+from src.config import OCR_BOOST_WEIGHT
 
 logger = logging.getLogger(__name__)
 
@@ -105,6 +107,15 @@ class MatchResult:
     # Format: [[x1,y1], [x2,y2], [x3,y3], [x4,y4]] - top-left, top-right, bottom-right, bottom-left
     boundary_corners: Optional[List[List[float]]] = None
 
+    # OCR disambiguation info (for card name/set/collector matching, NOT finish detection)
+    ocr_used: bool = False
+    ocr_title: Optional[str] = None
+    ocr_collector: Optional[str] = None
+    ocr_set_code: Optional[str] = None
+    ocr_collector_number: Optional[str] = None
+    ocr_title_confidence: Optional[float] = None
+    ocr_collector_confidence: Optional[float] = None
+
     # Debug info
     debug_info: Optional[Dict[str, Any]] = None
 
@@ -120,6 +131,13 @@ class MatchResult:
             'candidates': [c.to_dict() for c in self.candidates],
             'processing_time': float(self.processing_time),
             'boundary_corners': self.boundary_corners,
+            'ocr_used': self.ocr_used,
+            'ocr_title': self.ocr_title,
+            'ocr_collector': self.ocr_collector,
+            'ocr_set_code': self.ocr_set_code,
+            'ocr_collector_number': self.ocr_collector_number,
+            'ocr_title_confidence': self.ocr_title_confidence,
+            'ocr_collector_confidence': self.ocr_collector_confidence,
             'debug_info': self.debug_info
         }
 
@@ -214,9 +232,9 @@ class CardMatcher:
         logger.info(f"Scoring weights: {self.weights}")
         logger.info(f"Thresholds - Accept: {self.accept_threshold}, Manual: {self.manual_threshold}")
 
-        # Initialize embedder
+        # Initialize embedder (use global singleton to save memory)
         logger.info("Loading CLIP embedder...")
-        self.embedder = CLIPEmbedder(device=device, checkpoint_path=embedder_checkpoint)
+        self.embedder = get_embedder(device=device, checkpoint_path=embedder_checkpoint)
 
         # Load ANN index
         logger.info(f"Loading {index_type.upper()} index...")
@@ -247,7 +265,169 @@ class CardMatcher:
         # Initialize database connection
         self.db = SessionLocal()
 
+        # Initialize OCR disambiguator (lazy load to avoid import errors if pytesseract not installed)
+        self._ocr_disambiguator = None
+
         logger.info("CardMatcher ready")
+
+    def _score_candidate(
+        self,
+        card_id: str,
+        ann_distance: float,
+        scanned_phash_ints: Dict[str, int],
+        db_session=None
+    ) -> Optional[MatchCandidate]:
+        """
+        Score a single candidate card.
+
+        Used by parallel scoring to compute combined scores in worker threads.
+
+        Args:
+            card_id: Card ID from ANN search
+            ann_distance: Distance/similarity from ANN index
+            scanned_phash_ints: Dict of pHash integers for scanned image variants
+            db_session: Optional database session (for thread-safe parallel processing)
+
+        Returns:
+            MatchCandidate with computed scores, or None if card not found
+        """
+        # Use provided session or fall back to instance session (for single-threaded use)
+        session = db_session if db_session is not None else self.db
+
+        # Get card data with all variants
+        card_data = get_card_full_data(session, card_id)
+        if not card_data:
+            logger.warning(f"Card {card_id} not found in database")
+            return None
+
+        card = card_data['card']
+        phash_variants = card_data['phash_variants']
+        embedding_record = card_data['embedding']
+
+        # Get reference embedding
+        ref_embedding = deserialize_embedding(embedding_record.embedding)
+
+        # Compute embedding score
+        embedding_score = ann_distance
+        embedding_distance = 1.0 - embedding_score
+
+        # Compute pHash distances for all 3 variants
+        phash_distances = {}
+        for variant_type in ['full', 'name', 'collector']:
+            if variant_type in phash_variants:
+                ref_phash_hex = phash_variants[variant_type].phash
+                scanned_phash_int = scanned_phash_ints.get(variant_type, 0)
+                scanned_phash_hex = int_to_phash(scanned_phash_int)
+
+                distances = batch_hamming_distance(scanned_phash_hex, [ref_phash_hex])
+                phash_distances[variant_type] = int(distances[0])
+            else:
+                phash_distances[variant_type] = 64  # Max distance if variant missing
+
+        # Compute pHash score (weighted: 0.6*full + 0.3*name + 0.1*collector)
+        max_dist = 64.0
+        phash_full_score = 1.0 - min(phash_distances['full'] / max_dist, 1.0)
+        phash_name_score = 1.0 - min(phash_distances['name'] / max_dist, 1.0)
+        phash_collector_score = 1.0 - min(phash_distances['collector'] / max_dist, 1.0)
+
+        phash_score = (
+            0.6 * phash_full_score +
+            0.3 * phash_name_score +
+            0.1 * phash_collector_score
+        )
+
+        # Combined score: 85% embedding + 15% pHash
+        combined_score = (
+            self.weights['embedding'] * embedding_score +
+            self.weights['phash'] * phash_score
+        )
+
+        return MatchCandidate(
+            card_id=card.id,
+            card_name=card.name,
+            set_code=card.set_code,
+            collector_number=card.collector_number or '',
+            finish=card.finish,
+            scryfall_id=card.scryfall_id,
+            image_path=card.image_path or '',
+            embedding_score=embedding_score,
+            phash_score=phash_score,
+            combined_score=combined_score,
+            embedding_distance=embedding_distance,
+            phash_full_distance=phash_distances['full'],
+            phash_name_distance=phash_distances['name'],
+            phash_collector_distance=phash_distances['collector']
+        )
+
+    def _score_candidates_parallel(
+        self,
+        ann_candidates: List[Tuple[str, float]],
+        scanned_phash_ints: Dict[str, int],
+        max_workers: int = 4
+    ) -> List[MatchCandidate]:
+        """
+        Score all candidates in parallel using ThreadPoolExecutor.
+
+        Parallelizes database lookups and pHash computation for faster
+        candidate scoring when processing many candidates.
+
+        Each worker thread gets its own database session to ensure thread safety.
+        SQLAlchemy sessions are NOT thread-safe, so sharing self.db across threads
+        would cause data corruption and crashes.
+
+        Args:
+            ann_candidates: List of (card_id, distance) tuples from ANN search
+            scanned_phash_ints: Dict of pHash integers for scanned image variants
+            max_workers: Number of parallel workers
+
+        Returns:
+            List of MatchCandidate objects sorted by combined_score (descending)
+        """
+        import threading
+
+        # Thread-local storage for database sessions
+        thread_local = threading.local()
+
+        def get_thread_session():
+            """Get or create a thread-local database session."""
+            if not hasattr(thread_local, 'session'):
+                thread_local.session = SessionLocal()
+            return thread_local.session
+
+        def score_one(args):
+            card_id, ann_distance = args
+            session = get_thread_session()
+            return self._score_candidate(card_id, ann_distance, scanned_phash_ints, db_session=session)
+
+        try:
+            with ThreadPoolExecutor(max_workers=max_workers) as executor:
+                results = list(executor.map(score_one, ann_candidates))
+        finally:
+            # Clean up thread-local sessions
+            # Note: Sessions are cleaned up when threads exit, but explicit cleanup is safer
+            pass
+
+        # Filter None results and sort
+        candidates = [c for c in results if c is not None]
+        candidates.sort(key=lambda c: c.combined_score, reverse=True)
+
+        return candidates
+
+    def _get_ocr_disambiguator(self):
+        """Lazy-load OCR disambiguator to avoid import errors if pytesseract not installed."""
+        if self._ocr_disambiguator is None:
+            try:
+                from src.ocr.tesseract_service import TesseractOCRService
+                from src.ocr.disambiguator import OCRDisambiguator
+                ocr_service = TesseractOCRService()
+                if ocr_service.is_available():
+                    self._ocr_disambiguator = OCRDisambiguator(ocr_service, self.db)
+                    logger.info("OCR disambiguator initialized")
+                else:
+                    logger.warning("Tesseract not available, OCR disambiguation disabled")
+            except ImportError as e:
+                logger.warning(f"OCR modules not available: {e}")
+        return self._ocr_disambiguator
 
     def match_scanned(
         self,
@@ -302,8 +482,8 @@ class CardMatcher:
         # Extract regions
         regions = RegionExtractor.extract_all_regions(warped_rgb)
         
-        # Compute composite embedding
-        embedding_result = self.embedder.get_composite_embedding(
+        # Compute composite embedding (batched for efficiency - single CLIP forward pass)
+        embedding_result = self.embedder.get_composite_embedding_batched(
             full_image=regions['full'],
             regions={'collector': regions['collector'], 'name': regions['name']},
             weights={
@@ -346,75 +526,9 @@ class CardMatcher:
         candidates = []
 
         for card_id, ann_distance in ann_candidates:
-            # Get card data with all variants
-            card_data = get_card_full_data(self.db, card_id)
-            if not card_data:
-                logger.warning(f"Card {card_id} not found in database")
-                continue
-
-            card = card_data['card']
-            phash_variants = card_data['phash_variants']
-            embedding_record = card_data['embedding']
-
-            # Get reference embedding
-            ref_embedding = deserialize_embedding(embedding_record.embedding)
-
-            # Compute embedding score
-            # For cosine similarity (used by FAISS with IP), higher is better
-            # ann_distance is already similarity score from ANN index
-            embedding_score = ann_distance if self.index_type == 'faiss' else ann_distance
-            embedding_distance = 1.0 - embedding_score  # Convert to distance for storage
-
-            # Compute pHash distances for all 3 variants
-            phash_distances = {}
-            for variant_type in ['full', 'name', 'collector']:
-                if variant_type in phash_variants:
-                    ref_phash_hex = phash_variants[variant_type].phash
-                    scanned_phash_int = scanned_phash_ints.get(variant_type, 0)
-                    scanned_phash_hex = int_to_phash(scanned_phash_int)
-
-                    distances = batch_hamming_distance(scanned_phash_hex, [ref_phash_hex])
-                    phash_distances[variant_type] = int(distances[0])
-                else:
-                    phash_distances[variant_type] = 64  # Max distance if variant missing
-
-            # Compute pHash score (weighted: 0.6*full + 0.3*name + 0.1*collector)
-            max_dist = 64.0
-            phash_full_score = 1.0 - min(phash_distances['full'] / max_dist, 1.0)
-            phash_name_score = 1.0 - min(phash_distances['name'] / max_dist, 1.0)
-            phash_collector_score = 1.0 - min(phash_distances['collector'] / max_dist, 1.0)
-
-            phash_score = (
-                0.6 * phash_full_score +
-                0.3 * phash_name_score +
-                0.1 * phash_collector_score
-            )
-
-            # Combined score: 85% embedding + 15% pHash
-            combined_score = (
-                self.weights['embedding'] * embedding_score +
-                self.weights['phash'] * phash_score
-            )
-
-            # Create candidate
-            candidate = MatchCandidate(
-                card_id=card.id,
-                card_name=card.name,
-                set_code=card.set_code,
-                collector_number=card.collector_number or '',
-                finish=card.finish,
-                scryfall_id=card.scryfall_id,
-                image_path=card.image_path or '',
-                embedding_score=embedding_score,
-                phash_score=phash_score,
-                combined_score=combined_score,
-                embedding_distance=embedding_distance,
-                phash_full_distance=phash_distances['full'],
-                phash_name_distance=phash_distances['name'],
-                phash_collector_distance=phash_distances['collector']
-            )
-
-            candidates.append(candidate)
+            candidate = self._score_candidate(card_id, ann_distance, scanned_phash_ints)
+            if candidate:
+                candidates.append(candidate)
 
         # Sort candidates by combined score (descending)
         candidates.sort(key=lambda c: c.combined_score, reverse=True)
@@ -477,16 +591,75 @@ class CardMatcher:
             candidates.sort(key=lambda c: c.combined_score, reverse=True)
             logger.info(f"New top candidate after ORB: {candidates[0].card_name}")
 
+        # Step 5c: Compute initial clarity to decide if OCR is needed
+        clarity_score, is_ambiguous = compute_clarity(candidates)
+        initial_confidence = candidates[0].combined_score
+
+        # Step 5d: OCR Disambiguation (only if ambiguous or low confidence)
+        ocr_result = None
+        triangulated_match = None  # Direct match from triangulation (not in candidates)
+        if is_ambiguous or initial_confidence < self.accept_threshold:
+            logger.info("Step 5d: Running OCR disambiguation...")
+            ocr_disambiguator = self._get_ocr_disambiguator()
+            if ocr_disambiguator:
+                try:
+                    ocr_result = ocr_disambiguator.disambiguate(
+                        warped_rgb,
+                        candidates,
+                        boost_weight=OCR_BOOST_WEIGHT
+                    )
+                    if ocr_result.success:
+                        # Check if triangulation found a card not in candidates
+                        if ocr_result.method == 'triangulation' and ocr_result.card_id:
+                            # Check if this card is in our candidates
+                            card_in_candidates = any(c.card_id == ocr_result.card_id for c in candidates)
+                            if not card_in_candidates:
+                                # Triangulation found a card NOT in candidates - use it directly
+                                logger.info(f"Triangulation found card not in candidates: {ocr_result.card_id}")
+                                triangulated_card = self.db.query(Card).filter(Card.id == ocr_result.card_id).first()
+                                if triangulated_card:
+                                    # Create a high-confidence candidate for the triangulated card
+                                    triangulated_match = MatchCandidate(
+                                        card_id=triangulated_card.id,
+                                        card_name=triangulated_card.name,
+                                        set_code=triangulated_card.set_code,
+                                        collector_number=triangulated_card.collector_number or '',
+                                        finish=triangulated_card.finish,
+                                        scryfall_id=triangulated_card.scryfall_id,
+                                        image_path=triangulated_card.image_path or '',
+                                        embedding_score=0.95,  # High confidence from OCR
+                                        phash_score=0.95,
+                                        combined_score=0.95,  # Triangulation is high confidence
+                                        embedding_distance=0.05,
+                                        phash_full_distance=0,
+                                        phash_name_distance=0,
+                                        phash_collector_distance=0
+                                    )
+                                    # Insert as top candidate
+                                    candidates.insert(0, triangulated_match)
+                                    logger.info(f"Inserted triangulated card as top candidate: {triangulated_card.name} ({triangulated_card.set_code} #{triangulated_card.collector_number})")
+
+                        # Re-sort candidates after OCR boost
+                        candidates.sort(key=lambda c: c.combined_score, reverse=True)
+                        logger.info(f"New top candidate after OCR: {candidates[0].card_name}")
+                        # Recompute clarity after OCR
+                        clarity_score, is_ambiguous = compute_clarity(candidates)
+                except Exception as e:
+                    logger.warning(f"OCR disambiguation failed: {e}")
+            else:
+                logger.debug("OCR disambiguator not available, skipping")
+
         # Step 6: Determine match confidence and clarity
         top_candidate = candidates[0]
         match_card_id = top_candidate.card_id
         confidence = top_candidate.combined_score
 
-        # Compute clarity score (search-based matching)
-        clarity_score, is_ambiguous = compute_clarity(candidates)
-
         # Determine match method based on confidence AND clarity
-        if confidence >= self.accept_threshold:
+        # Triangulation is highest priority - it's an exact database match
+        if triangulated_match is not None and top_candidate.card_id == triangulated_match.card_id:
+            match_method = 'ocr_triangulation'
+            logger.info(f"🎯 OCR Triangulation match: {top_candidate.card_name} ({top_candidate.set_code} #{top_candidate.collector_number})")
+        elif confidence >= self.accept_threshold:
             if is_ambiguous:
                 # High confidence but multiple similar candidates
                 match_method = 'ambiguous_high'
@@ -504,6 +677,15 @@ class CardMatcher:
         # Create result
         processing_time = (datetime.now() - start_time).total_seconds()
 
+        # Build OCR info for result (disambiguation only, not finish detection)
+        ocr_used = ocr_result is not None and ocr_result.success
+        ocr_title = ocr_result.title_text if ocr_result else None
+        ocr_collector = ocr_result.collector_info.raw_text if ocr_result and ocr_result.collector_info else None
+        ocr_set_code = ocr_result.collector_info.set_code if ocr_result and ocr_result.collector_info else None
+        ocr_collector_number = ocr_result.collector_info.collector_number if ocr_result and ocr_result.collector_info else None
+        ocr_title_confidence = ocr_result.title_confidence if ocr_result else None
+        ocr_collector_confidence = ocr_result.collector_confidence if ocr_result else None
+
         result = MatchResult(
             scanned_path=str(image_path),
             match_card_id=match_card_id,
@@ -513,7 +695,14 @@ class CardMatcher:
             processing_time=processing_time,
             clarity_score=clarity_score,
             is_ambiguous=is_ambiguous,
-            boundary_corners=boundary_corners
+            boundary_corners=boundary_corners,
+            ocr_used=ocr_used,
+            ocr_title=ocr_title,
+            ocr_collector=ocr_collector,
+            ocr_set_code=ocr_set_code,
+            ocr_collector_number=ocr_collector_number,
+            ocr_title_confidence=ocr_title_confidence,
+            ocr_collector_confidence=ocr_collector_confidence
         )
 
         logger.info(f"Matching completed in {processing_time:.2f}s")
@@ -625,17 +814,23 @@ def main():
         print(f"Method: {result.match_method}")
         print(f"Processing Time: {result.processing_time:.2f}s")
 
-        if result.ocr_name:
-            print(f"\nOCR Name: {result.ocr_name}")
-        if result.ocr_collector:
-            print(f"OCR Collector: {result.ocr_collector}")
+        if result.ocr_used:
+            print(f"\nOCR Used: Yes")
+            if result.ocr_title:
+                print(f"OCR Title: {result.ocr_title}")
+            if result.ocr_collector:
+                print(f"OCR Collector: {result.ocr_collector}")
+            if result.ocr_set_code:
+                print(f"OCR Set Code: {result.ocr_set_code}")
+            if result.ocr_collector_number:
+                print(f"OCR Collector #: {result.ocr_collector_number}")
 
         print(f"\nTop 5 Candidates:")
         print("-" * 80)
         for i, candidate in enumerate(result.candidates[:5], 1):
             print(f"{i}. {candidate.card_name} ({candidate.set_code} #{candidate.collector_number})")
             print(f"   Score: {candidate.combined_score:.3f} (emb: {candidate.embedding_score:.3f}, "
-                  f"phash: {candidate.phash_score:.3f}, ocr: {candidate.ocr_score:.3f})")
+                  f"phash: {candidate.phash_score:.3f})")
 
         # Save to file if requested
         if args.output:

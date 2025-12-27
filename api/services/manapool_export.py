@@ -24,122 +24,31 @@ MANAPOOL_PRODUCT_TYPE = "mtg_single"
 MANAPOOL_LANGUAGE_OUTPUT = "ENGLISH"
 MANAPOOL_CONDITION_OUTPUT = "NM"
 
-# Finish mappings (keyed by lowercase finish string for lookup)
-# Each entry maps to a tuple: (manapool_code, mtgsold_finish_string)
-MTGSOLD_FINISH_MAP: Dict[str, Tuple[str, str]] = {
-    # Base finishes
-    "nonfoil": ("NF", "NON FOIL"),
-    "non foil": ("NF", "NON FOIL"),
-    "foil": ("FO", "FOIL"),
-    "etched": ("EF", "FOIL ETCHED"),
-    "etched foil": ("EF", "FOIL ETCHED"),
-    "foil etched": ("EF", "FOIL ETCHED"),
-    # variant types
-    "borderless foil": ("FO", "BORDERLESS FOIL"),
-    "borderless foil etched": ("EF", "BORDERLESS FOIL ETCHED"),
-    "borderless non foil": ("NF", "BORDERLESS NON FOIL"),
-    "borderless showcase foil": ("FO", "BORDERLESS SHOWCASE FOIL"),
-    "borderless showcase foil etched": ("EF", "BORDERLESS SHOWCASE FOIL ETCHED"),
-    "borderless showcase non foil": ("NF", "BORDERLESS SHOWCASE NON FOIL"),
-    "borderless showcase surge foil": ("FO", "BORDERLESS SHOWCASE SURGE FOIL"),
-    "borderless surge foil": ("FO", "BORDERLESS SURGE FOIL"),
-    "collector edition": ("NF", "COLLECTOR EDITION"),
-    "galaxy borderless foil": ("FO", "GALAXY BORDERLESS FOIL"),
-    "galaxy borderless non foil": ("NF", "GALAXY BORDERLESS NON FOIL"),
-    "galaxy borderless showcase foil": ("FO", "GALAXY BORDERLESS SHOWCASE FOIL"),
-    "galaxy foil": ("FO", "GALAXY FOIL"),
-    "galaxy showcase foil": ("FO", "GALAXY SHOWCASE FOIL"),
-    "halo borderless foil": ("FO", "HALO BORDERLESS FOIL"),
-    "halo borderless showcase foil": ("FO", "HALO BORDERLESS SHOWCASE FOIL"),
-    "halo showcase foil": ("FO", "HALO SHOWCASE FOIL"),
-    "non foil": ("NF", "NON FOIL"),
-    "oil slick raised borderless foil": ("FO", "OIL SLICK RAISED BORDERLESS FOIL"),
-    "rainbow borderless foil": ("FO", "RAINBOW BORDERLESS FOIL"),
-    "rainbow borderless non foil": ("NF", "RAINBOW BORDERLESS NON FOIL"),
-    "rainbow borderless showcase foil": ("FO", "RAINBOW BORDERLESS SHOWCASE FOIL"),
-    "rainbow borderless showcase non foil": ("NF", "RAINBOW BORDERLESS SHOWCASE NON FOIL"),
-    "rainbow foil": ("FO", "RAINBOW FOIL"),
-    "rainbow non foil": ("NF", "RAINBOW NON FOIL"),
-    "rainbow showcase foil": ("FO", "RAINBOW SHOWCASE FOIL"),
-    "raised borderless foil": ("FO", "RAISED BORDERLESS FOIL"),
-    "raised borderless showcase foil": ("FO", "RAISED BORDERLESS SHOWCASE FOIL"),
-    "raised showcase foil": ("FO", "RAISED SHOWCASE FOIL"),
-    "showcase foil": ("FO", "SHOWCASE FOIL"),
-    "showcase nonfoil": ("NF", "SHOWCASE NON FOIL"),
-    "showcase non foil": ("NF", "SHOWCASE NON FOIL"),
-    "showcase surge foil": ("FO", "SHOWCASE SURGE FOIL"),
-    "surge foil": ("FO", "SURGE FOIL"),
-}
-
-def _normalize_finish(raw_finish: str) -> str:
-    """
-    Normalize finish string for lookup (handle nonfoil/no-space variants).
-    """
-    normalized = (raw_finish or "").lower().strip()
-    if normalized == "nonfoil":
-        normalized = "non foil"
-    return normalized
-
-
-def _finish_candidate_keys(raw_finish: str, variant_type: Optional[str]) -> List[str]:
-    """
-    Build candidate lookup keys ordered by specificity.
-    Includes variant-type combinations (showcase/borderless) when present.
-    """
-    key = _normalize_finish(raw_finish)
-    variant = (variant_type or "").lower().strip()
-
-    candidates: List[str] = []
-    # Variant-specific permutations (most specific first)
-    if variant:
-        if "borderless" in variant and "showcase" in variant:
-            candidates.append(f"borderless showcase {key}")
-        if "borderless" in variant:
-            candidates.append(f"borderless {key}")
-        if "showcase" in variant:
-            candidates.append(f"showcase {key}")
-    # Base key
-    candidates.append(key)
-    # Deduplicate while preserving order
-    seen = set()
-    ordered: List[str] = []
-    for c in candidates:
-        if c and c not in seen:
-            seen.add(c)
-            ordered.append(c)
-    return ordered
-
-
 def _map_finish_for_manapool(raw_finish: str) -> str:
-    """
-    Map internal finish to Manapool finish code; default to NF if unknown.
-    """
+    """Map internal finish to Manapool code with proper non-foil handling."""
     key = (raw_finish or "").lower().strip()
-    if key in MTGSOLD_FINISH_MAP:
-        return MTGSOLD_FINISH_MAP[key][0]
-
-    # Fallback heuristic: etched > foil/surge > nonfoil
-    if "etched" in key:
+    norm = key.replace("-", "").replace("_", "").replace(" ", "")
+    # Non-foil must win before any generic "foil" substring
+    if norm.startswith("nonfoil") or "nonfoil" in norm or norm == "nf":
+        return "NF"
+    if "etched" in norm:
         return "EF"
-    if "foil" in key or "surge" in key:
+    if "foil" in norm or "surge" in norm:
         return "FO"
     return "NF"
 
-
-def _map_finish_for_mtgsold(raw_finish: str, variant_type: Optional[str]) -> Optional[str]:
-    """
-    Map internal finish to MTGSold finish string; return None when unmapped.
-    """
-    key = (raw_finish or "").lower().strip()
-    for cand in _finish_candidate_keys(raw_finish, variant_type):
-        if cand in MTGSOLD_FINISH_MAP:
-            return MTGSOLD_FINISH_MAP[cand][1]
-
-    # Fallback heuristic: etched > foil/surge > nonfoil
-    if "etched" in key:
-        return "FOIL ETCHED"
-    if "foil" in key or "surge" in key:
-        return "FOIL"
+def _match_sku_for_finish(skus: List[Dict], local_finish: str) -> Optional[Dict]:
+    """Match SKU by finish; tolerate 'non-foil' variants."""
+    local_lower = (local_finish or "").lower().strip()
+    norm = local_lower.replace("-", "").replace("_", "").replace(" ", "")
+    for sku in skus:
+        mtg_finish = (sku.get("finish") or "").upper()
+        if "etched" in norm and "ETCHED" in mtg_finish:
+            return sku
+        elif norm == "foil" and mtg_finish.endswith("FOIL") and "NON FOIL" not in mtg_finish:
+            return sku
+        elif norm in ("nonfoil", "nf") and "NON FOIL" in mtg_finish:
+            return sku
     return None
 
 
@@ -151,52 +60,55 @@ def _mtgsold_headers() -> Dict[str, str]:
     return headers
 
 
-def _batch_fetch_mtgsold_skus(grouped: Dict[str, List[str]]) -> Dict[str, Dict[str, object]]:
+def _batch_fetch_mtgsold_skus(scryfall_ids: List[str]) -> Dict[str, List[Dict]]:
     """
-    Batch fetch MTGSold SKUs using PostgREST in-filter.
-    grouped: mtgsold_finish -> list of scryfall_ids.
-    Returns mapping scryfall_id -> MTGSold fields.
-    """
-    results: Dict[str, Dict[str, object]] = {}
+    Fetch ALL SKUs for given scryfall_ids (no finish filter).
 
-    if MTGSOLD_API_TOKEN is None:
+    Returns: scryfall_id -> list of SKU records
+
+    This approach is more robust than filtering by exact finish string because:
+    - MTGSold finish strings include variant info (BORDERLESS SHOWCASE, etc.)
+    - We don't need to construct exact finish strings
+    - We can match by finish category (foil/nonfoil/etched) from the results
+    """
+    results: Dict[str, List[Dict]] = {}
+
+    if MTGSOLD_API_TOKEN is None or not scryfall_ids:
         return results
 
-    for mtgsold_finish, scryfall_ids in grouped.items():
-        if not scryfall_ids:
-            continue
+    # Deduplicate scryfall_ids
+    unique_ids = list(set(scryfall_ids))
 
-        # PostgREST in list
-        in_list = ",".join(scryfall_ids)
-        params = {
-            "select": "scryfall_id,mp_product_id,market_price,condition_short,finish,language",
-            "scryfall_id": f"in.({in_list})",
-            "finish": f"eq.{mtgsold_finish}",
-            "language": f"eq.{MANAPOOL_LANGUAGE_OUTPUT}",
-            "limit": len(scryfall_ids),
-        }
+    # PostgREST in list - query without finish filter
+    in_list = ",".join(unique_ids)
+    params = {
+        "select": "scryfall_id,mp_product_id,market_price,condition_short,finish,language",
+        "scryfall_id": f"in.({in_list})",
+        "language": f"eq.{MANAPOOL_LANGUAGE_OUTPUT}",
+    }
 
-        try:
-            response = requests.get(
-                f"{MTGSOLD_API_BASE}/api/skus",
-                params=params,
-                headers=_mtgsold_headers(),
-                timeout=20,
-            )
-            if not response.ok:
-                continue
+    try:
+        response = requests.get(
+            f"{MTGSOLD_API_BASE}/api/skus",
+            params=params,
+            headers=_mtgsold_headers(),
+            timeout=20,
+        )
+        if not response.ok:
+            return results
 
-            payload = response.json()
-            records = payload.get("data") if isinstance(payload, dict) else payload
-            if not records:
-                continue
+        payload = response.json()
+        records = payload.get("data") if isinstance(payload, dict) else payload
+        if not records:
+            return results
 
-            for record in records:
-                sid = record.get("scryfall_id")
-                if sid:
-                    results[sid] = record
-        except Exception:
-            continue
+        # Group by scryfall_id (each card may have multiple SKUs for different finishes)
+        for record in records:
+            sid = record.get("scryfall_id")
+            if sid:
+                results.setdefault(sid, []).append(record)
+    except Exception:
+        pass
 
     return results
 
@@ -229,35 +141,32 @@ def build_manapool_csv(resolved_rows: List[Tuple[BatchResult, DBCard]]) -> str:
             }
         consolidated[key]["quantity"] += 1
 
-    # Batch MTGSold lookups grouped by mapped MTGSold finish to avoid per-row calls
-    grouped_by_mtgsold_finish: Dict[str, List[str]] = {}
-    for meta in consolidated.values():
-        finish_raw = meta.get("finish_raw")
-        variant_type = meta.get("variant_type")
-        scryfall_id = meta.get("scryfall_id")
-        if not scryfall_id:
-            continue
-        mtgsold_finish = _map_finish_for_mtgsold(finish_raw, variant_type)
-        if not mtgsold_finish:
-            continue
-        grouped_by_mtgsold_finish.setdefault(mtgsold_finish, []).append(scryfall_id)
+    # Collect all scryfall_ids for batch MTGSold lookup
+    scryfall_ids = [
+        meta.get("scryfall_id")
+        for meta in consolidated.values()
+        if meta.get("scryfall_id")
+    ]
 
-    mtgsold_lookup = _batch_fetch_mtgsold_skus(grouped_by_mtgsold_finish)
+    # Fetch all SKUs for these cards (no finish filter - we'll match by category)
+    mtgsold_lookup = _batch_fetch_mtgsold_skus(scryfall_ids)
 
     manapool_rows = []
     for key, meta in consolidated.items():
         set_code, collector_number, manapool_finish, language_out, condition_out, name = key
         scryfall_id = meta.get("scryfall_id")
         finish_raw = meta.get("finish_raw")
-        variant_type = meta.get("variant_type")
 
         mp_product_id = market_price = api_condition = api_language = None
         if scryfall_id and scryfall_id in mtgsold_lookup:
-            rec = mtgsold_lookup[scryfall_id]
-            mp_product_id = rec.get("mp_product_id")
-            market_price = rec.get("market_price")
-            api_condition = rec.get("condition_short")
-            api_language = rec.get("language")
+            # Match the correct SKU based on our finish category (foil/nonfoil/etched)
+            skus = mtgsold_lookup[scryfall_id]
+            rec = _match_sku_for_finish(skus, finish_raw)
+            if rec:
+                mp_product_id = rec.get("mp_product_id")
+                market_price = rec.get("market_price")
+                api_condition = rec.get("condition_short")
+                api_language = rec.get("language")
 
         condition_value = api_condition or condition_out
         language_value = api_language or language_out

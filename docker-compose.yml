@@ -32,9 +32,9 @@ services:
     deploy:
       resources:
         limits:
-          memory: 4G
+          memory: 32G
         reservations:
-          memory: 2G
+          memory: 16G
     networks:
       - mtg-network
 

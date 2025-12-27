@@ -166,6 +166,10 @@ def extract_metadata_from_path(image_path: Path, json_path: Optional[Path] = Non
                 metadata['collector_number'] = json_data['collector_number']
             if 'id' in json_data:
                 metadata['scryfall_id'] = json_data['id']
+            if 'tcgplayer_id' in json_data:
+                metadata['tcgplayer_id'] = json_data['tcgplayer_id']
+            if 'tcgplayer_etched_id' in json_data:
+                metadata['tcgplayer_etched_id'] = json_data['tcgplayer_etched_id']
             if 'finishes' in json_data:
                 # Determine finish from path or JSON
                 if 'foil' in str(image_path).lower() or 'foil' in json_data.get('finishes', []):

@@ -26,6 +26,8 @@ class Card(Base):
     variant_type = Column(String(50), nullable=True, index=True)  # 'normal', 'extended_art', 'showcase', 'borderless', etc.
     frame_effects = Column(JSON, nullable=True)  # Additional frame treatments (textured, etched, gilded, etc.)
     image_path = Column(String(500), nullable=True)
+    tcgplayer_id = Column(Integer, nullable=True, index=True)  # TCGPlayer product ID
+    tcgplayer_etched_id = Column(Integer, nullable=True)  # TCGPlayer etched variant ID
     created_at = Column(DateTime, default=datetime.utcnow)
 
     # Relationships

@@ -1,67 +1,215 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>MTG Card Recognition - Batch Upload</title>
-    <link rel="stylesheet" href="/static/css/style.css">
+    <meta charset="utf-8"/>
+    <meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+    <title>MTG Scanner Pro - Upload Scans</title>
+    <link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&display=swap" rel="stylesheet"/>
+    <link href="https://fonts.googleapis.com" rel="preconnect"/>
+    <link crossorigin="" href="https://fonts.gstatic.com" rel="preconnect"/>
+    <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;700&display=swap" rel="stylesheet"/>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet"/>
+    <script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    colors: {
+                        "primary": "#0071e3",
+                        "primary-hover": "#0077ed",
+                        "bg-page": "#f5f5f7",
+                        "surface": "#ffffff",
+                        "surface-alt": "#fbfbfd",
+                        "border-subtle": "#d1d1d6",
+                        "border-light": "#e5e5ea",
+                        "text-main": "#1d1d1f",
+                        "text-secondary": "#86868b",
+                        "success": "#34c759",
+                        "danger": "#ff3b30",
+                        "warning": "#ff9f0a",
+                        "foil-gold": "#d4af37",
+                    },
+                    fontFamily: {
+                        "display": ["Space Grotesk", "sans-serif"],
+                        "sans": ["Inter", "-apple-system", "BlinkMacSystemFont", "Segoe UI", "Roboto", "Helvetica", "Arial", "sans-serif"],
+                    },
+                    borderRadius: {"DEFAULT": "0.5rem", "lg": "0.75rem", "xl": "1rem", "2xl": "1.25rem", "3xl": "1.5rem", "full": "9999px"},
+                    boxShadow: {
+                        "soft": "0 2px 8px rgba(0, 0, 0, 0.04), 0 1px 2px rgba(0, 0, 0, 0.02)",
+                        "card": "0 4px 20px rgba(0, 0, 0, 0.03)",
+                        "glow": "0 0 20px rgba(0, 113, 227, 0.15)",
+                    }
+                },
+            },
+        }
+    </script>
+    <style>
+        body { font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif; }
+        ::-webkit-scrollbar { width: 10px; height: 10px; }
+        ::-webkit-scrollbar-track { background: transparent; }
+        ::-webkit-scrollbar-thumb { background: #d1d1d6; border-radius: 5px; border: 2px solid #f5f5f7; }
+        ::-webkit-scrollbar-thumb:hover { background: #a1a1a6; }
+
+        /* Radio button styling */
+        .finish-radio:checked + .finish-label {
+            background-color: #0071e3;
+            color: white;
+            border-color: #0071e3;
+        }
+        .finish-radio:checked + .finish-label .radio-icon {
+            color: white;
+        }
+    </style>
 </head>
-<body>
-    <div class="container">
-        <header>
-            <h1>🃏 MTG Card Recognition</h1>
-            <p class="subtitle">Upload card images for automatic recognition</p>
-        </header>
-
-        <main>
-            <div class="upload-section">
-                <div id="dropZone" class="drop-zone">
-                    <svg class="upload-icon" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" />
-                    </svg>
-                    <h2>Drag & Drop Images Here</h2>
-                    <p>or click to browse</p>
-                    <p class="file-types">Supports: JPG, PNG, or ZIP file</p>
-                    <input type="file" id="fileInput" multiple accept="image/*,.zip" style="display: none;">
+<body class="bg-bg-page text-text-main h-screen flex flex-col overflow-hidden antialiased selection:bg-primary/10 selection:text-primary">
+    <!-- Header -->
+    <header class="flex items-center justify-between whitespace-nowrap border-b border-border-light bg-surface/80 backdrop-blur-xl px-6 py-3 shrink-0 z-30 sticky top-0">
+        <div class="flex items-center gap-6">
+            <div class="flex items-center gap-2.5">
+                <div class="size-8 text-primary flex items-center justify-center bg-primary/10 rounded-lg">
+                    <span class="material-symbols-outlined text-2xl">view_in_ar</span>
                 </div>
-
-                <div id="fileList" class="file-list" style="display: none;">
-                    <h3>Selected Files</h3>
-                    <ul id="filesUl"></ul>
-                </div>
-
-                <div class="options">
-                    <label for="setCode">Set Code (optional):</label>
-                    <input type="text" id="setCode" placeholder="e.g., TLA, DMR, SLD" maxlength="10">
-                    <p class="hint">Filtering by set improves speed and accuracy</p>
-                </div>
-
-                <div class="options">
-                    <label>Card Finish:</label>
-                    <div class="finish-selector">
-                        <label class="radio-option">
-                            <input type="radio" name="finish" value="nonfoil" checked>
-                            <span>Nonfoil</span>
-                        </label>
-                        <label class="radio-option">
-                            <input type="radio" name="finish" value="foil">
-                            <span>Foil</span>
-                        </label>
-                    </div>
-                    <p class="hint">Select the finish type of your cards</p>
-                </div>
-
-                <button id="uploadBtn" class="btn btn-primary" disabled>
-                    Start Recognition
-                </button>
+                <h2 class="text-text-main text-lg font-bold font-display tracking-tight">MTG Scanner Pro</h2>
             </div>
+            <div class="h-6 w-px bg-border-light mx-2 hidden md:block"></div>
+            <nav class="hidden md:flex items-center gap-1">
+                <a class="px-3 py-1.5 rounded-lg text-sm font-medium text-text-secondary hover:text-text-main hover:bg-gray-100 transition-all" href="#">Review Queue</a>
+                <a class="px-3 py-1.5 rounded-lg text-sm font-medium text-text-secondary hover:text-text-main hover:bg-gray-100 transition-all" href="#">Batches</a>
+                <a class="px-3 py-1.5 rounded-lg text-sm font-medium text-primary bg-primary/5 transition-all" href="/">Upload Scans</a>
+                <a class="px-3 py-1.5 rounded-lg text-sm font-medium text-text-secondary hover:text-text-main hover:bg-gray-100 transition-all" href="#">Settings</a>
+            </nav>
+        </div>
+        <div class="flex items-center gap-3">
+            <button class="size-9 flex items-center justify-center rounded-full hover:bg-gray-100 text-text-secondary transition-colors relative">
+                <span class="material-symbols-outlined text-[22px]">notifications</span>
+            </button>
+            <div class="size-9 bg-gradient-to-br from-primary to-blue-600 rounded-full border border-border-light shadow-sm flex items-center justify-center text-white font-semibold text-sm">
+                U
+            </div>
+        </div>
+    </header>
 
-            <div id="progressSection" class="progress-section" style="display: none;">
-                <h2>Processing Batch...</h2>
-                <div class="progress-bar">
-                    <div id="progressFill" class="progress-fill"></div>
+    <div class="flex flex-1 overflow-hidden relative">
+        <main class="flex-1 flex flex-col relative overflow-y-auto">
+            <div class="p-8 lg:p-12 max-w-5xl mx-auto w-full space-y-8">
+                <!-- Page Title -->
+                <div class="flex flex-col md:flex-row md:items-end justify-between gap-4">
+                    <div>
+                        <h1 class="text-3xl font-semibold text-text-main mb-2 tracking-tight">Upload Scans</h1>
+                        <p class="text-text-secondary text-base font-light">Import card images for intelligent batch processing.</p>
+                    </div>
                 </div>
-                <p id="progressText">0 / 0 cards processed</p>
+
+                <div class="grid grid-cols-1 lg:grid-cols-12 gap-8">
+                    <!-- Left Column: Configuration -->
+                    <div class="lg:col-span-7 space-y-6">
+                        <!-- Batch Configuration Card -->
+                        <div class="bg-surface border border-white rounded-2xl shadow-card p-6 space-y-6">
+                            <div class="flex items-center gap-3 border-b border-border-light pb-4">
+                                <span class="material-symbols-outlined text-primary">tune</span>
+                                <h3 class="text-text-main font-semibold text-lg">Batch Configuration</h3>
+                            </div>
+
+                            <div class="space-y-5">
+                                <!-- Set Code -->
+                                <div class="space-y-2">
+                                    <label class="text-xs font-semibold text-text-secondary uppercase tracking-wider">Set Code (Optional)</label>
+                                    <input id="setCode" type="text"
+                                           class="w-full bg-surface-alt border border-border-subtle/60 rounded-lg px-4 py-3 text-text-main focus:outline-none focus:border-primary focus:ring-4 focus:ring-primary/10 transition-all placeholder:text-text-secondary/50 text-sm shadow-sm"
+                                           placeholder="e.g. TLA, DMR, SLD" maxlength="100"/>
+                                    <p class="text-xs text-text-secondary">Filtering by set improves speed and accuracy</p>
+                                </div>
+
+                                <!-- Card Finish -->
+                                <div class="space-y-3">
+                                    <label class="text-xs font-semibold text-text-secondary uppercase tracking-wider">Card Finish</label>
+                                    <div class="grid grid-cols-2 gap-3">
+                                        <!-- Nonfoil (default) -->
+                                        <div>
+                                            <input type="radio" name="finish" value="nonfoil" id="finish-nonfoil" class="finish-radio sr-only" checked>
+                                            <label for="finish-nonfoil" class="finish-label flex flex-col items-center gap-2 p-5 bg-surface-alt border border-border-subtle/60 rounded-xl cursor-pointer hover:border-primary/50 transition-all text-center">
+                                                <span class="material-symbols-outlined text-3xl radio-icon text-text-secondary">layers</span>
+                                                <span class="text-sm font-medium">Nonfoil</span>
+                                            </label>
+                                        </div>
+                                        <!-- Foil -->
+                                        <div>
+                                            <input type="radio" name="finish" value="foil" id="finish-foil" class="finish-radio sr-only">
+                                            <label for="finish-foil" class="finish-label flex flex-col items-center gap-2 p-5 bg-surface-alt border border-border-subtle/60 rounded-xl cursor-pointer hover:border-primary/50 transition-all text-center">
+                                                <span class="material-symbols-outlined text-3xl radio-icon text-foil-gold">blur_on</span>
+                                                <span class="text-sm font-medium">Foil</span>
+                                            </label>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Upload Queue Card -->
+                        <div id="uploadQueueCard" class="bg-surface border border-white rounded-2xl shadow-card overflow-hidden" style="display: none;">
+                            <div class="p-4 bg-gray-50 border-b border-border-light flex items-center justify-between">
+                                <h3 class="text-text-main font-semibold text-sm flex items-center gap-2">
+                                    Upload Queue <span id="fileCount" class="bg-gray-200 text-text-secondary px-1.5 py-0.5 rounded text-xs font-bold">0</span>
+                                </h3>
+                                <button onclick="clearFiles()" class="text-xs text-danger hover:underline font-medium">Clear All</button>
+                            </div>
+                            <div id="fileList" class="p-2 space-y-2 max-h-[300px] overflow-y-auto">
+                                <!-- Files will be populated here -->
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Right Column: Drop Zone -->
+                    <div class="lg:col-span-5 flex flex-col h-full">
+                        <div class="bg-surface border border-white rounded-2xl shadow-card p-6 flex-1 flex flex-col">
+                            <!-- Drop Zone -->
+                            <div id="dropZone" class="relative group flex-1 min-h-[320px] cursor-pointer">
+                                <div class="absolute -inset-1 bg-gradient-to-tr from-blue-100 to-purple-50 rounded-2xl opacity-0 group-hover:opacity-100 blur-lg transition duration-700"></div>
+                                <div class="relative w-full h-full border-2 border-dashed border-border-subtle hover:border-primary bg-surface-alt hover:bg-white rounded-2xl flex flex-col items-center justify-center transition-all group-hover:shadow-glow">
+                                    <div class="size-20 bg-white shadow-sm border border-border-light rounded-2xl flex items-center justify-center mb-6 group-hover:scale-110 group-hover:-translate-y-1 transition-all duration-300">
+                                        <span class="material-symbols-outlined text-4xl text-primary">cloud_upload</span>
+                                    </div>
+                                    <h3 class="text-xl font-semibold text-text-main mb-2">Drag scans here</h3>
+                                    <p class="text-text-secondary mb-8 text-sm text-center max-w-[200px]">Supports JPG, PNG, or ZIP up to 25MB per file</p>
+                                    <button type="button" class="px-6 py-2.5 bg-white border border-border-light text-text-main hover:border-primary hover:text-primary font-medium rounded-full shadow-sm hover:shadow transition-all flex items-center gap-2 transform active:scale-95">
+                                        <span class="material-symbols-outlined text-xl">folder_open</span>
+                                        Browse Files
+                                    </button>
+                                </div>
+                                <input type="file" id="fileInput" multiple accept="image/*,.zip" class="absolute inset-0 w-full h-full opacity-0 cursor-pointer"/>
+                            </div>
+
+                            <!-- Action Buttons -->
+                            <div class="mt-6 pt-6 border-t border-border-light">
+                                <div id="totalSizeRow" class="flex items-center justify-between text-sm text-text-secondary mb-4" style="display: none;">
+                                    <span>Total Size</span>
+                                    <span id="totalSize" class="font-medium text-text-main">0 MB</span>
+                                </div>
+                                <button id="uploadBtn" disabled
+                                        class="w-full px-4 py-3.5 bg-primary hover:bg-primary-hover disabled:bg-gray-300 disabled:cursor-not-allowed text-white font-semibold rounded-xl shadow-lg shadow-blue-500/30 disabled:shadow-none transition-all flex items-center justify-center gap-2 transform active:scale-[0.98]">
+                                    <span class="material-symbols-outlined text-lg">rocket_launch</span>
+                                    <span id="uploadBtnText">Start Recognition</span>
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Progress Section (hidden by default) -->
+                <div id="progressSection" class="bg-surface border border-white rounded-2xl shadow-card p-8" style="display: none;">
+                    <div class="flex items-center gap-4 mb-6">
+                        <div class="size-12 bg-primary/10 rounded-xl flex items-center justify-center">
+                            <span class="material-symbols-outlined text-2xl text-primary animate-spin">progress_activity</span>
+                        </div>
+                        <div>
+                            <h2 class="text-xl font-semibold text-text-main">Processing Batch...</h2>
+                            <p class="text-text-secondary text-sm" id="progressText">0 / 0 cards processed</p>
+                        </div>
+                    </div>
+                    <div class="h-3 w-full bg-gray-100 rounded-full overflow-hidden">
+                        <div id="progressFill" class="h-full bg-gradient-to-r from-primary to-blue-400 rounded-full transition-all duration-300 shadow-[0_0_10px_rgba(0,113,227,0.4)]" style="width: 0%"></div>
+                    </div>
+                </div>
             </div>
         </main>
     </div>
@@ -70,8 +218,12 @@
         const dropZone = document.getElementById('dropZone');
         const fileInput = document.getElementById('fileInput');
         const uploadBtn = document.getElementById('uploadBtn');
-        const fileList = document.getElementById('fileList');
-        const filesUl = document.getElementById('filesUl');
+        const uploadBtnText = document.getElementById('uploadBtnText');
+        const fileListDiv = document.getElementById('fileList');
+        const uploadQueueCard = document.getElementById('uploadQueueCard');
+        const fileCountSpan = document.getElementById('fileCount');
+        const totalSizeRow = document.getElementById('totalSizeRow');
+        const totalSizeSpan = document.getElementById('totalSize');
         const setCodeInput = document.getElementById('setCode');
         const progressSection = document.getElementById('progressSection');
         const progressFill = document.getElementById('progressFill');
@@ -80,20 +232,24 @@
         let selectedFiles = [];
 
         // Drag and drop handlers
-        dropZone.addEventListener('click', () => fileInput.click());
+        dropZone.addEventListener('click', (e) => {
+            if (e.target.tagName !== 'INPUT') {
+                fileInput.click();
+            }
+        });
 
         dropZone.addEventListener('dragover', (e) => {
             e.preventDefault();
-            dropZone.classList.add('drag-over');
+            dropZone.classList.add('ring-4', 'ring-primary/20');
         });
 
         dropZone.addEventListener('dragleave', () => {
-            dropZone.classList.remove('drag-over');
+            dropZone.classList.remove('ring-4', 'ring-primary/20');
         });
 
         dropZone.addEventListener('drop', (e) => {
             e.preventDefault();
-            dropZone.classList.remove('drag-over');
+            dropZone.classList.remove('ring-4', 'ring-primary/20');
             handleFiles(e.dataTransfer.files);
         });
 
@@ -105,17 +261,56 @@
             selectedFiles = Array.from(files);
 
             if (selectedFiles.length > 0) {
-                fileList.style.display = 'block';
-                filesUl.innerHTML = '';
+                uploadQueueCard.style.display = 'block';
+                totalSizeRow.style.display = 'flex';
+                fileCountSpan.textContent = selectedFiles.length;
+                fileListDiv.innerHTML = '';
 
-                selectedFiles.forEach(file => {
-                    const li = document.createElement('li');
-                    li.textContent = `${file.name} (${formatBytes(file.size)})`;
-                    filesUl.appendChild(li);
+                let totalBytes = 0;
+                selectedFiles.forEach((file, index) => {
+                    totalBytes += file.size;
+                    const fileItem = document.createElement('div');
+                    fileItem.className = 'bg-white p-3 flex items-center gap-4 rounded-xl hover:bg-gray-50 transition-colors';
+                    fileItem.innerHTML = `
+                        <div class="size-10 bg-gray-100 rounded-lg flex items-center justify-center flex-shrink-0 border border-border-light">
+                            <span class="material-symbols-outlined text-text-secondary">image</span>
+                        </div>
+                        <div class="flex-1 min-w-0">
+                            <p class="text-text-main text-sm font-medium truncate">${file.name}</p>
+                            <p class="text-xs text-text-secondary">${formatBytes(file.size)}</p>
+                        </div>
+                        <button onclick="removeFile(${index})" class="size-8 flex items-center justify-center text-text-secondary hover:text-danger rounded-full hover:bg-danger/5 transition-all">
+                            <span class="material-symbols-outlined text-lg">close</span>
+                        </button>
+                    `;
+                    fileListDiv.appendChild(fileItem);
                 });
 
+                totalSizeSpan.textContent = formatBytes(totalBytes);
                 uploadBtn.disabled = false;
+            } else {
+                clearFiles();
             }
+        }
+
+        function removeFile(index) {
+            selectedFiles.splice(index, 1);
+            if (selectedFiles.length === 0) {
+                clearFiles();
+            } else {
+                // Re-render
+                const dt = new DataTransfer();
+                selectedFiles.forEach(f => dt.items.add(f));
+                handleFiles(dt.files);
+            }
+        }
+
+        function clearFiles() {
+            selectedFiles = [];
+            fileInput.value = '';
+            uploadQueueCard.style.display = 'none';
+            totalSizeRow.style.display = 'none';
+            uploadBtn.disabled = true;
         }
 
         function formatBytes(bytes) {
@@ -129,7 +324,7 @@
             if (selectedFiles.length === 0) return;
 
             uploadBtn.disabled = true;
-            uploadBtn.textContent = 'Uploading...';
+            uploadBtnText.textContent = 'Uploading...';
 
             const formData = new FormData();
             selectedFiles.forEach(file => {
@@ -137,11 +332,12 @@
             });
 
             const setCode = setCodeInput.value.trim().toUpperCase();
-            const finish = document.querySelector('input[name="finish"]:checked').value;
+            const finishRadio = document.querySelector('input[name="finish"]:checked');
+            const finishValue = finishRadio ? finishRadio.value : 'nonfoil';
 
             const params = new URLSearchParams();
             if (setCode) params.append('set_code', setCode);
-            if (finish) params.append('finish', finish);
+            if (finishValue) params.append('finish', finishValue);
 
             const url = params.toString()
                 ? `/api/batch/upload?${params.toString()}`
@@ -154,13 +350,14 @@
                 });
 
                 if (!response.ok) {
-                    throw new Error('Upload failed');
+                    const error = await response.json();
+                    throw new Error(error.detail || 'Upload failed');
                 }
 
                 const data = await response.json();
 
-                // Show progress section
-                document.querySelector('.upload-section').style.display = 'none';
+                // Hide upload UI, show progress
+                document.querySelector('.grid').style.display = 'none';
                 progressSection.style.display = 'block';
 
                 // Start polling for progress
@@ -169,7 +366,7 @@
             } catch (error) {
                 alert('Upload failed: ' + error.message);
                 uploadBtn.disabled = false;
-                uploadBtn.textContent = 'Start Recognition';
+                uploadBtnText.textContent = 'Start Recognition';
             }
         });
 
