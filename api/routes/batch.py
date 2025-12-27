@@ -28,6 +28,7 @@ from api.services.manapool_export import build_manapool_csv
 from api.services.mtgsold_config import is_mtgsold_enabled
 from api.services.queue import acquire_batch_slot, get_queue_status, run_with_concurrency_control
 from api.services.rate_limiter import limiter
+from api.services.cleanup import run_full_cleanup
 from src.database.schema import Card as DBCard
 
 router = APIRouter()
@@ -161,6 +162,32 @@ async def get_queue_status_endpoint():
         "available_slots": status.available_slots,
         "active_batch_ids": status.active_batch_ids,
         "waiting_batch_ids": status.waiting_batch_ids
+    }
+
+
+@router.post("/cleanup")
+async def trigger_cleanup(retention_hours: int = 24):
+    """
+    Manually trigger cleanup of old batches.
+
+    Deletes batches older than retention_hours and their uploaded files.
+    Also removes orphaned upload directories.
+
+    Args:
+        retention_hours: Hours to keep batches (default 24)
+
+    Returns:
+        Cleanup statistics
+    """
+    stats = run_full_cleanup(retention_hours=retention_hours)
+    mb_freed = stats["total_bytes_freed"] / (1024 * 1024)
+
+    return {
+        "success": True,
+        "batches_deleted": stats["batches_deleted"],
+        "files_deleted": stats["files_deleted"],
+        "orphans_deleted": stats["orphans_deleted"],
+        "mb_freed": round(mb_freed, 2)
     }
 
 

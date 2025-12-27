@@ -29,7 +29,11 @@ sys.path.insert(0, str(project_root))
 from api.routes import batch
 from api.models import BatchStatus
 from api.services.rate_limiter import limiter
+from api.services.cleanup import run_full_cleanup
 from src.utils.device import configure_cpu_threads, resolve_device
+
+# Cleanup configuration
+BATCH_RETENTION_HOURS = 24  # Delete batches older than 24 hours
 
 
 @asynccontextmanager
@@ -42,6 +46,18 @@ async def lifespan(app: FastAPI):
         logger.info(f"Running on CPU with {num_threads} threads")
     else:
         logger.info(f"Running on {device}")
+
+    # Cleanup old batches on startup
+    try:
+        stats = run_full_cleanup(retention_hours=BATCH_RETENTION_HOURS)
+        if stats["batches_deleted"] > 0 or stats["orphans_deleted"] > 0:
+            mb_freed = stats["total_bytes_freed"] / (1024 * 1024)
+            logger.info(
+                f"Startup cleanup: {stats['batches_deleted']} batches, "
+                f"{stats['orphans_deleted']} orphans, {mb_freed:.1f} MB freed"
+            )
+    except Exception as e:
+        logger.warning(f"Startup cleanup failed: {e}")
 
     yield  # App runs here
 
